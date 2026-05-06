@@ -253,7 +253,7 @@ Typical cost: **< $0.01 per check** (varies by provider)
 
 ## Contributing
 
-Issues/PRs: https://bitbucket.org/walzate1/nexus
+Issues/PRs: https://github.com/jhannka/nexus-cli
 
 ## License
 

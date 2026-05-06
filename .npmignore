@@ -1,0 +1,16 @@
+.gitignore
+CONTRIBUTING.md
+QUICK_START.md
+CHANGELOG.md
+.git
+.github
+node_modules
+dist
+coverage
+*.test.js
+*.test.ts
+test/
+__tests__/
+.DS_Store
+*.log
+npm-debug.log*

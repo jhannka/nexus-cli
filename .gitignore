@@ -1,0 +1,10 @@
+node_modules/
+dist/
+build/
+*.log
+.env
+.env.local
+.DS_Store
+.claude/
+rename-nexus.ps1
+package-lock.json

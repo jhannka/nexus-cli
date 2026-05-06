@@ -92,11 +92,10 @@ Then use from any project:
 nexus
 ```
 
-### Per-Project
+### Ad-Hoc (without installation)
 
 ```bash
-npm install --save-dev @walzate1/nexus
-npx nexus
+npx @walzate1/nexus
 ```
 
 ## Configuration

@@ -1,8 +1,8 @@
 {
-  "name": "@walzate1/nexus",
+  "name": "nexus-cli",
   "version": "1.0.0",
-  "description": "AI-powered code review CLI. Analyze TypeScript projects with Claude, OpenAI, Gemini. No installation required.",
-  "license": "UNLICENSED",
+  "description": "AI-powered code review CLI. Analyze any code (TypeScript, JavaScript, Python, Go, Java, etc.) with Claude, OpenAI, or Gemini.",
+  "license": "MIT",
   "author": "jhannka",
   "type": "module",
   "main": "src/check.js",
@@ -40,8 +40,8 @@
   "files": [
     "src"
   ],
-  "private": true,
-  "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jhannka/nexus-cli.git"
   }
 }

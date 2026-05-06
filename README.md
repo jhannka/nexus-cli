@@ -25,7 +25,7 @@ User decides next step
 ### Install
 
 ```bash
-npm install -g @walzate1/nexus
+npm install -g nexus-cli
 ```
 
 ### Set API Key
@@ -83,7 +83,7 @@ Total: 5 issue(s) found
 ### Global (Recommended)
 
 ```bash
-npm install -g @walzate1/nexus
+npm install -g nexus-cli
 ```
 
 Then use from any project:
@@ -95,7 +95,7 @@ nexus
 ### Ad-Hoc (without installation)
 
 ```bash
-npx @walzate1/nexus
+npx nexus-cli
 ```
 
 ## Configuration

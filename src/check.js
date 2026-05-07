@@ -325,6 +325,31 @@ For each issue:
   }
 }
 
+async function categorizeAgents(files) {
+  const fileExtensions = files.map(f => f.split('.').pop()?.toLowerCase()).filter(Boolean);
+  const hasTs = fileExtensions.includes('ts') || fileExtensions.includes('tsx');
+  const hasJs = fileExtensions.includes('js') || fileExtensions.includes('jsx');
+  const hasCss = fileExtensions.includes('css') || fileExtensions.includes('scss');
+  const hasHtml = fileExtensions.includes('html');
+  const hasPy = fileExtensions.includes('py');
+  const hasSql = fileExtensions.includes('sql');
+
+  const allAgents = [
+    { name: 'security', applicable: true },
+    { name: 'performance', applicable: true },
+    { name: 'architecture', applicable: true },
+    { name: 'quality', applicable: true },
+    { name: 'testing', applicable: hasTs || hasJs },
+    { name: 'lint', applicable: hasTs || hasJs || hasCss },
+    { name: 'types', applicable: hasTs },
+  ];
+
+  const recommended = allAgents.filter(a => a.applicable);
+  const notApplicable = allAgents.filter(a => !a.applicable);
+
+  return { recommended, notApplicable };
+}
+
 async function runAnalysis(config) {
   const git = new GitDetector(projectRoot);
   const commitMsg = git.getLatestCommitMessage();
@@ -333,6 +358,40 @@ async function runAnalysis(config) {
   const activeChecks = Object.entries(config.checks)
     .filter(([, enabled]) => enabled)
     .map(([name]) => name);
+
+  const files = git.getChangedFiles();
+  if (files.length === 0) {
+    console.clear();
+    console.log('⚠️  No code changes found in git');
+    console.log('   (No staged/unstaged changes or new files)\n');
+    return;
+  }
+
+  // Show agent recommendations
+  const { recommended, notApplicable } = await categorizeAgents(files);
+
+  console.clear();
+  console.log(`\n${COLORS.cyan}${COLORS.bold}NEXUS${COLORS.reset} v${selfPkg.version}\n`);
+  console.log(`${COLORS.bold}Reviewing:${COLORS.reset} ${commitMsg}`);
+  console.log(`${branchRef}\n`);
+
+  if (recommended.length > 0) {
+    console.log(`${COLORS.dim}— Recommended (${recommended.length}) ${COLORS.reset}`);
+    recommended.forEach(a => {
+      console.log(`  ${COLORS.cyan}[✓]${COLORS.reset} ${a.name}`);
+    });
+  }
+
+  if (notApplicable.length > 0) {
+    console.log(`\n${COLORS.dim}— Not Applicable (${notApplicable.length}) ${COLORS.reset}`);
+    notApplicable.forEach(a => {
+      console.log(`  ${COLORS.dim}[−] ${a.name}${COLORS.reset}`);
+    });
+  }
+
+  console.log(`\n${COLORS.dim}Min severity: critical high medium low${COLORS.reset}\n`);
+  await new Promise(r => setTimeout(r, 2000)); // Pause to let user read
+
   const agentNames = activeChecks.map(c => `${c}-reviewer`);
 
   console.clear();
@@ -340,15 +399,6 @@ async function runAnalysis(config) {
   ui.init(commitMsg, branchRef, agentNames);
 
   ui.update(1, 5, 0);
-  const files = git.getChangedFiles();
-  if (files.length === 0) {
-    ui.finish();
-    console.log('⚠️  No code changes found in git');
-    console.log('   (No staged/unstaged changes or new files)\n');
-    console.log(`${COLORS.dim}Press any key to return to menu...${COLORS.reset}`);
-    await tui.getKeyPress();
-    return;
-  }
 
   ui.update(2, 5, 0);
   let localFindings = [];

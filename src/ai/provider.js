@@ -71,6 +71,7 @@ export class AIProvider {
       const response = await client.messages.create({
         model: this.model,
         max_tokens: maxTokens,
+        temperature: 0,
         system: systemPrompt,
         messages: [{ role: 'user', content: userContent }],
         tools: [{ name: toolName, description: `Submit findings`, input_schema: toolSchema }],
@@ -87,6 +88,8 @@ export class AIProvider {
       const response = await openai.chat.completions.create({
         model: this.model,
         max_tokens: maxTokens,
+        temperature: 0,
+        seed: 42,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userContent }
@@ -104,7 +107,10 @@ export class AIProvider {
       const genAI = new GoogleGenerativeAI(this.apiKey);
       const model = genAI.getGenerativeModel({
         model: this.model,
-        generationConfig: { responseMimeType: 'application/json' }
+        generationConfig: {
+          responseMimeType: 'application/json',
+          temperature: 0
+        }
       });
       const fullPrompt = `${systemPrompt}\n\n${userContent}\n\nReturn ONLY JSON matching this schema (no markdown, no commentary):\n${JSON.stringify(toolSchema, null, 2)}`;
       const result = await model.generateContent(fullPrompt);

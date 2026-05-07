@@ -513,16 +513,23 @@ async function runAnalysis(config) {
 
   ui.update(4, 5, selectedChecks.length);
   const allFindings = [...localFindings, ...aiFindings];
-  const unique = [];
-  const seen = new Set();
 
-  for (const finding of allFindings) {
-    const key = `${finding.type}:${finding.file}:${finding.message}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      unique.push(finding);
+  // Dedup: collapse findings on same file:line, keep highest severity.
+  // Reason: AI agents often flag same line for overlapping reasons; one finding per line is enough.
+  const sevRankDedup = { critical: 4, high: 3, medium: 2, warning: 2, low: 1, info: 0 };
+  const byLine = new Map();
+  for (const f of allFindings) {
+    const key = `${f.file}:${f.line || '?'}`;
+    const existing = byLine.get(key);
+    if (!existing) {
+      byLine.set(key, f);
+      continue;
     }
+    const newRank = sevRankDedup[(f.severity || 'medium').toLowerCase()] ?? 2;
+    const oldRank = sevRankDedup[(existing.severity || 'medium').toLowerCase()] ?? 2;
+    if (newRank > oldRank) byLine.set(key, f);
   }
+  const unique = Array.from(byLine.values());
 
   // Filter by minimum severity based on user selection
   const severityOrder = { critical: 3, high: 2, medium: 1, warning: 1, low: 0, info: 0 };

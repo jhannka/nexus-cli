@@ -4,6 +4,9 @@ const COLORS = {
   dim: '\x1b[2m',
   cyan: '\x1b[36m',
   green: '\x1b[32m',
+  red: '\x1b[31m',
+  yellow: '\x1b[33m',
+  magenta: '\x1b[35m',
   bgCyan: '\x1b[46m',
   bgBlack: '\x1b[40m'
 };
@@ -114,10 +117,18 @@ export class ResultsMenu {
         ? `${COLORS.bgCyan}${isChecked ? '✓' : ' '}${COLORS.reset}`
         : ` ${isChecked ? '✓' : ' '}`;
 
-      const severity = {
-        error: `${COLORS.red}${finding.severity.toUpperCase()}${COLORS.reset}`,
-        warning: `${COLORS.yellow}${finding.severity.toUpperCase()}${COLORS.reset}`
-      }[finding.severity] || finding.severity;
+      const severityColors = {
+        critical: COLORS.magenta,
+        high: COLORS.red,
+        error: COLORS.red,
+        medium: COLORS.yellow,
+        warning: COLORS.yellow,
+        low: COLORS.dim,
+        info: COLORS.dim
+      };
+      const sev = (finding.severity || 'medium').toLowerCase();
+      const sevColor = severityColors[sev] || COLORS.dim;
+      const severity = `${sevColor}${sev.toUpperCase()}${COLORS.reset}`;
 
       const label = isSelected
         ? `${COLORS.cyan}${COLORS.bold}${finding.file}:${finding.line || '?'}${COLORS.reset}`

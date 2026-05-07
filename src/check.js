@@ -29,6 +29,33 @@ const COLORS = {
   cyan: '\x1b[36m'
 };
 
+function readlineInput() {
+  return new Promise(resolve => {
+    let input = '';
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+
+    const onData = (char) => {
+      const code = char[0];
+      if (code === 13) { // Enter
+        process.stdin.setRawMode(false);
+        process.stdin.pause();
+        process.stdin.removeListener('data', onData);
+        console.log();
+        resolve(input);
+      } else if (code === 127) { // Backspace
+        input = input.slice(0, -1);
+        process.stdout.write('\b \b');
+      } else {
+        input += char;
+        process.stdout.write(char);
+      }
+    };
+
+    process.stdin.on('data', onData);
+  });
+}
+
 
 async function runLocalChecks(config) {
   // Skip local checks for now - focus on AI analysis
@@ -393,6 +420,7 @@ async function runAnalysis(config) {
   const severityLevels = ['critical', 'high', 'medium', 'low'];
   let selectedAgents = new Set(recommended.map(a => a.name));
   let minSeverity = 'medium';
+  const recommendedArray = Array.from(recommended);
 
   let configuring = true;
   while (configuring) {
@@ -404,24 +432,40 @@ async function runAnalysis(config) {
     console.log(`${COLORS.bold}Analysis Configuration${COLORS.reset}\n`);
 
     console.log(`${COLORS.bold}Select Agents:${COLORS.reset}`);
-    recommended.forEach(a => {
+    recommendedArray.forEach((a, i) => {
       const checked = selectedAgents.has(a.name) ? '☑' : '☐';
-      console.log(`  ${checked} ${a.name}`);
+      console.log(`  [${i + 1}] ${checked} ${a.name}`);
     });
 
     console.log(`\n${COLORS.bold}Minimum Severity:${COLORS.reset}`);
     severityLevels.forEach(level => {
+      const shortcut = level[0].toUpperCase();
       const selected = minSeverity === level ? '◉' : '○';
-      console.log(`  ${selected} ${level}`);
+      console.log(`  [${shortcut}] ${selected} ${level}`);
     });
 
-    console.log(`\n${COLORS.dim}[1-${recommended.length}] Toggle agent  [S/H/M/L] Set severity  [Enter] Start${COLORS.reset}`);
+    console.log(`\n${COLORS.dim}[1-${recommendedArray.length}] Toggle agent  [C/H/M/L] Set severity  [Enter] Start${COLORS.reset}`);
+    console.log(`${COLORS.dim}Example: Press "1" to toggle first agent, "H" for high severity${COLORS.reset}\n`);
 
-    // Simple input - just press Enter to start
-    // For full menu, would need readline or similar
-    console.log(`\n${COLORS.dim}Press Enter to start analysis...${COLORS.reset}`);
-    await tui.getKeyPress();
-    configuring = false;
+    process.stdout.write(`${COLORS.dim}> ${COLORS.reset}`);
+    const input = await readlineInput();
+
+    if (input.toLowerCase() === '') {
+      configuring = false;
+    } else {
+      const num = parseInt(input);
+      if (num > 0 && num <= recommendedArray.length) {
+        const agentName = recommendedArray[num - 1].name;
+        if (selectedAgents.has(agentName)) {
+          selectedAgents.delete(agentName);
+        } else {
+          selectedAgents.add(agentName);
+        }
+      } else if (['c', 'h', 'm', 'l'].includes(input.toLowerCase())) {
+        const severityMap = { c: 'critical', h: 'high', m: 'medium', l: 'low' };
+        minSeverity = severityMap[input.toLowerCase()];
+      }
+    }
   }
 
   const agentNames = Array.from(selectedAgents).map(c => `${c}-reviewer`);

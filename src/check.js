@@ -12,6 +12,9 @@ import { loadConfig, getApiKeyForProvider, saveConfig, setApiKey, setChecks, set
 import { CodeAnalyzer } from './core/analyzer.js';
 import { GitDetector } from './core/git-detector.js';
 import { AIProvider } from './ai/provider.js';
+import { FINDING_TOOL_SCHEMA, normalizeFinding } from './ai/finding-schema.js';
+import { buildSystemPrompt } from './ai/prompt-builder.js';
+import { parseDiff, buildAnnotatedDiff, isValidAdditionLine } from './ai/content-builder.js';
 
 const projectRoot = process.cwd();
 const tui = new TUI();
@@ -157,130 +160,127 @@ async function getChangeDiff(files) {
   return diffs;
 }
 
+const AGENT_PROMPT_FILES = {
+  security: 'security-reviewer.txt',
+  performance: 'performance-reviewer.txt',
+  architecture: 'architecture-reviewer.txt',
+  testing: 'testing-reviewer.txt',
+  quality: 'ts-reviewer.txt',
+  types: 'ts-reviewer.txt',
+  lint: 'ts-reviewer.txt'
+};
+
+const AGENT_CATEGORIES = {
+  security: 'security',
+  performance: 'performance',
+  architecture: 'architecture',
+  testing: 'testing',
+  quality: 'maintainability',
+  types: 'maintainability',
+  lint: 'style'
+};
+
+function loadAgentPrompt(checkName) {
+  const file = AGENT_PROMPT_FILES[checkName];
+  if (!file) return null;
+  try {
+    return readFileSync(resolve(__dirname, 'ai/prompts', file), 'utf-8');
+  } catch (err) {
+    log(`Failed to load prompt for ${checkName}: ${err.message}`);
+    return null;
+  }
+}
+
 async function analyzeWithAgents(files, config, ui, activeChecks) {
-  const diffs = await getChangeDiff(files.slice(0, 5));
+  const provider = config.provider || 'anthropic';
+  const apiKey = getApiKeyForProvider(provider);
+  if (!apiKey) {
+    log('analyzeWithAgents: no API key configured');
+    return [];
+  }
+
+  const defaultModels = { anthropic: 'claude-opus-4-7', openai: 'gpt-4', gemini: 'gemini-2.0-flash' };
+  const model = config.models?.[provider] || defaultModels[provider];
+  const aiProvider = new AIProvider(provider, apiKey, model);
+
+  const rawDiffs = await getChangeDiff(files.slice(0, 10));
+  const combinedDiff = Object.values(rawDiffs).join('\n');
+  const parsedFiles = parseDiff(combinedDiff);
+  const annotatedDiff = buildAnnotatedDiff(parsedFiles);
+
+  if (!annotatedDiff.trim()) {
+    log('analyzeWithAgents: empty annotated diff');
+    return [];
+  }
+
+  const language = config.language || 'english';
+  const minSeverity = config.minSeverity || 'medium';
+  const PER_AGENT_TIMEOUT_MS = 60000;
 
   const agentPromises = activeChecks.map(async (checkName, index) => {
     const agentNameReviewer = `${checkName}-reviewer`;
     const startTime = Date.now();
 
-    await new Promise(r => setTimeout(r, index * 250));
+    await new Promise(r => setTimeout(r, index * 200));
     ui.setAgentState(agentNameReviewer, 'running');
 
-    const agentFindings = [];
-
-    // Analyze diff for specific patterns
-    for (const [file, diff] of Object.entries(diffs)) {
-      const lines = diff.split('\n');
-
-      if (checkName === 'security') {
-        // SQL Injection patterns
-        if (/SELECT.*FROM.*WHERE.*\$|sql\s*=.*\+|backtick.*\$|template.*sql/i.test(diff)) {
-          agentFindings.push({
-            type: 'security',
-            file,
-            message: 'Potential SQL injection - string concatenation in SQL query',
-            severity: 'high'
-          });
-        }
-
-        // Hardcoded secrets
-        if (/(password|api_key|secret|token|credential)\s*=\s*['"][^'"]{5,}['"]|const\s+(password|api_key)\s*=/i.test(diff)) {
-          agentFindings.push({
-            type: 'security',
-            file,
-            message: 'Hardcoded secrets or credentials detected',
-            severity: 'critical'
-          });
-        }
-
-        // Insecure HTTP
-        if (/\bhttps?:\/\/localhost|http:\/\/.+:(3000|5000|8000|8080)|\bhttp:\/\//.test(diff) && !diff.includes('https')) {
-          agentFindings.push({
-            type: 'security',
-            file,
-            message: 'Insecure HTTP connection - use HTTPS',
-            severity: 'high'
-          });
-        }
-
-        // XSS risks
-        if (/innerHTML\s*=|dangerouslySetInnerHTML|document\.write|eval\(|Function\(/i.test(diff)) {
-          agentFindings.push({
-            type: 'security',
-            file,
-            message: 'Potential XSS vulnerability - unsafe DOM manipulation',
-            severity: 'high'
-          });
-        }
-
-        // Path traversal
-        if (/fs\.(read|write|access)[^)]*\.\.[^)]*\+|fs\.(read|write|access)[^)]*\+[^)]*\.\.|require\s*\(\s*['"][^'"]*\.\.[^'"]*\+|\.\.\/.*\+/i.test(diff)) {
-          agentFindings.push({
-            type: 'security',
-            file,
-            message: 'Potential path traversal vulnerability',
-            severity: 'high'
-          });
-        }
-
-        // eval/dynamic code execution
-        if (/\beval\s*\(|new\s+Function\s*\(|setTimeout\s*\(\s*['"]|setInterval\s*\(\s*['"]/i.test(diff)) {
-          agentFindings.push({
-            type: 'security',
-            file,
-            message: 'Dynamic code execution detected (eval/Function)',
-            severity: 'critical'
-          });
-        }
-      }
-
-      if (checkName === 'quality') {
-        // Type annotations
-        if (/(:\s*any|as\s+any|\[key:\s*string\]:\s*any)/i.test(diff)) {
-          agentFindings.push({
-            type: 'quality',
-            file,
-            message: 'Missing or overly broad type annotations',
-            severity: 'warning'
-          });
-        }
-
-        // Null checks
-        if (/\?\.|\?|null|undefined|!\./.test(diff) && !/if\s*\(|&&|optional|catch/.test(diff)) {
-          agentFindings.push({
-            type: 'quality',
-            file,
-            message: 'Potential null or undefined reference without checks',
-            severity: 'warning'
-          });
-        }
-
-        // Dead code
-        if (/const\s+\w+\s*=|let\s+\w+\s*=/.test(diff)) {
-          const unused = diff.match(/const\s+(\w+)|let\s+(\w+)/g) || [];
-          if (unused.length > 0) {
-            agentFindings.push({
-              type: 'quality',
-              file,
-              message: 'Potential unused variables detected',
-              severity: 'info'
-            });
-          }
-        }
-      }
+    const basePrompt = loadAgentPrompt(checkName);
+    if (!basePrompt) {
+      ui.setAgentState(agentNameReviewer, 'failed', { error: 'no prompt' });
+      return [];
     }
 
-    // Analysis time
-    await new Promise(r => setTimeout(r, 800 + Math.random() * 1200));
+    const systemPrompt = buildSystemPrompt(basePrompt, { language, minSeverity });
 
-    const duration = Date.now() - startTime;
-    ui.setAgentState(agentNameReviewer, 'done', {
-      findings: agentFindings.length,
-      duration
-    });
+    try {
+      const result = await Promise.race([
+        aiProvider.analyzeWithTool({
+          systemPrompt,
+          userContent: annotatedDiff,
+          toolName: 'report_findings',
+          toolSchema: FINDING_TOOL_SCHEMA,
+          maxTokens: 4096
+        }),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), PER_AGENT_TIMEOUT_MS))
+      ]);
 
-    return agentFindings;
+      const findings = [];
+      const rawFindings = (result && Array.isArray(result.findings)) ? result.findings : [];
+      for (const raw of rawFindings) {
+        const normalized = normalizeFinding(raw, agentNameReviewer);
+        if (!normalized) {
+          log(`[${agentNameReviewer}] dropped invalid finding`);
+          continue;
+        }
+        if (normalized.severity === 'low' || normalized.severity === 'info') {
+          continue;
+        }
+        if (!isValidAdditionLine(normalized.filePath, normalized.lineNumber, parsedFiles)) {
+          log(`[${agentNameReviewer}] dropped finding at ${normalized.filePath}:${normalized.lineNumber} (not addition line)`);
+          continue;
+        }
+        findings.push({
+          type: AGENT_CATEGORIES[checkName] || normalized.category,
+          file: normalized.filePath,
+          line: normalized.lineNumber,
+          message: normalized.title,
+          problem: normalized.problem,
+          rationale: normalized.rationale,
+          suggestion: normalized.suggestion,
+          severity: normalized.severity,
+          agentId: agentNameReviewer
+        });
+      }
+
+      const duration = Date.now() - startTime;
+      ui.setAgentState(agentNameReviewer, 'done', { findings: findings.length, duration });
+      return findings;
+    } catch (err) {
+      log(`[${agentNameReviewer}] error: ${err.message}`);
+      const duration = Date.now() - startTime;
+      ui.setAgentState(agentNameReviewer, 'failed', { error: err.message, duration });
+      return [];
+    }
   });
 
   const results = await Promise.all(agentPromises);
@@ -353,16 +353,23 @@ async function generateSolutions(findings, config) {
 
   const promises = findings.map(async (finding) => {
     const sev = (finding.severity || 'medium').toUpperCase();
+    const detailed = [
+      finding.problem ? `Problem context: ${finding.problem}` : '',
+      finding.rationale ? `Rationale: ${finding.rationale}` : '',
+      finding.suggestion ? `Suggested approach: ${finding.suggestion}` : ''
+    ].filter(Boolean).join('\n');
+
     const prompt = `${langInst}.
 
 You are a code review expert. Generate a practical solution for this single code issue:
 
 [${sev}] ${finding.file}:${finding.line || '?'}
-${finding.message}
+Title: ${finding.message}
+${detailed}
 
-Format your response as:
+Format your response exactly as:
 ## Issue: ${finding.file}:${finding.line || '?'} - ${finding.type || 'issue'}
-**Problem**: brief explanation of why it's a problem
+**Problem**: explain why it's a problem (1-2 sentences)
 **Solution**:
 \`\`\`typescript
 correct code example here
@@ -494,7 +501,7 @@ async function runAnalysis(config) {
   log(`About to call analyzeWithAgents with ${selectedChecks.length} checks`);
   let aiFindings = [];
   try {
-    aiFindings = await analyzeWithAgents(files, config, ui, selectedChecks);
+    aiFindings = await analyzeWithAgents(files, { ...config, minSeverity }, ui, selectedChecks);
     log(`analyzeWithAgents returned ${aiFindings.length} findings`);
   } catch (err) {
     log(`Error in analyzeWithAgents: ${err.message}`);

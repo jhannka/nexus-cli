@@ -60,4 +60,62 @@ export class AIProvider {
       throw err;
     }
   }
+
+  /**
+   * Analyze with a tool/function call. Returns parsed JSON object matching toolSchema.
+   * Anthropic uses native tool_use. OpenAI uses function calling. Gemini falls back to JSON-in-text.
+   */
+  async analyzeWithTool({ systemPrompt, userContent, toolName, toolSchema, maxTokens = 4096 }) {
+    if (this.provider === 'anthropic') {
+      const client = new Anthropic({ apiKey: this.apiKey });
+      const response = await client.messages.create({
+        model: this.model,
+        max_tokens: maxTokens,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userContent }],
+        tools: [{ name: toolName, description: `Submit findings`, input_schema: toolSchema }],
+        tool_choice: { type: 'tool', name: toolName }
+      });
+      const toolUse = response.content.find(c => c.type === 'tool_use');
+      if (!toolUse) return { findings: [] };
+      return toolUse.input;
+    }
+
+    if (this.provider === 'openai') {
+      const { default: OpenAI } = await import('openai');
+      const openai = new OpenAI({ apiKey: this.apiKey });
+      const response = await openai.chat.completions.create({
+        model: this.model,
+        max_tokens: maxTokens,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userContent }
+        ],
+        tools: [{ type: 'function', function: { name: toolName, description: 'Submit findings', parameters: toolSchema } }],
+        tool_choice: { type: 'function', function: { name: toolName } }
+      });
+      const toolCall = response.choices[0]?.message?.tool_calls?.[0];
+      if (!toolCall) return { findings: [] };
+      try { return JSON.parse(toolCall.function.arguments); } catch { return { findings: [] }; }
+    }
+
+    if (this.provider === 'gemini') {
+      const { GoogleGenerativeAI } = await import('@google/generative-ai');
+      const genAI = new GoogleGenerativeAI(this.apiKey);
+      const model = genAI.getGenerativeModel({
+        model: this.model,
+        generationConfig: { responseMimeType: 'application/json' }
+      });
+      const fullPrompt = `${systemPrompt}\n\n${userContent}\n\nReturn ONLY JSON matching this schema (no markdown, no commentary):\n${JSON.stringify(toolSchema, null, 2)}`;
+      const result = await model.generateContent(fullPrompt);
+      const text = result.response.text();
+      try { return JSON.parse(text); } catch {
+        const match = text.match(/\{[\s\S]*\}/);
+        if (match) { try { return JSON.parse(match[0]); } catch {} }
+        return { findings: [] };
+      }
+    }
+
+    throw new Error(`Unknown provider: ${this.provider}`);
+  }
 }

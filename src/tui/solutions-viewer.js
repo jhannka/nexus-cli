@@ -316,12 +316,38 @@ export class SolutionsViewer {
       const newContent = result.fileContent.replace(result.fix.oldCode, result.fix.newCode);
       writeFileSync(result.filePath, newContent, 'utf-8');
       await this.showStatus(`✓ Fix applied to ${finding.file}`, C.green);
+      this.solutions.splice(this.index, 1);
+      this.findings.splice(this.index, 1);
+      if (this.solutions.length === 0) {
+        this.busy = false;
+        this._closeViewer();
+        return;
+      }
+      if (this.index >= this.solutions.length) {
+        this.index = this.solutions.length - 1;
+      }
     } catch (e) {
       await this.showStatus(`Write failed: ${e.message}`, C.red);
     }
 
     this.busy = false;
     this.render();
+  }
+
+  _closeViewer() {
+    if (this._onData) {
+      process.stdin.removeListener('data', this._onData);
+      this._onData = null;
+    }
+    if (process.stdin.isTTY) {
+      process.stdin.setRawMode(false);
+    }
+    console.clear();
+    if (this._resolve) {
+      const r = this._resolve;
+      this._resolve = null;
+      r();
+    }
   }
 
   async show() {
@@ -331,6 +357,7 @@ export class SolutionsViewer {
     }
 
     return new Promise(resolve => {
+      this._resolve = resolve;
       console.clear();
       this.render();
 
@@ -357,15 +384,11 @@ export class SolutionsViewer {
         } else if (key === 'a' || key === 'A') {
           this.handleApply();
         } else if (key === 'q' || key === 'Q' || key === '\x1b' || key === '\x03' || key === '\r' || key === '\n') {
-          process.stdin.removeListener('data', onData);
-          if (process.stdin.isTTY) {
-            process.stdin.setRawMode(false);
-          }
-          console.clear();
-          resolve();
+          this._closeViewer();
         }
       };
 
+      this._onData = onData;
       process.stdin.on('data', onData);
     });
   }

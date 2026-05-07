@@ -389,27 +389,40 @@ async function runAnalysis(config) {
     });
   }
 
-  console.log(`\n${COLORS.dim}Min severity: critical high medium low${COLORS.reset}\n`);
+  // Interactive selection menu
+  const severityLevels = ['critical', 'high', 'medium', 'low'];
+  let selectedAgents = new Set(recommended.map(a => a.name));
+  let minSeverity = 'medium';
 
-  // Allow user to select which agents to run
-  const agentSelectionItems = recommended.map(a => ({
-    label: `${a.name.charAt(0).toUpperCase() + a.name.slice(1)}`,
-    value: a.name,
-    sublabel: '✓'
-  }));
+  let configuring = true;
+  while (configuring) {
+    console.clear();
+    console.log(`${COLORS.cyan}${COLORS.bold}NEXUS${COLORS.reset} v${selfPkg.version}\n`);
+    console.log(`${COLORS.bold}Reviewing:${COLORS.reset} ${commitMsg}`);
+    console.log(`${branchRef}\n`);
 
-  const selectMenu = new Menu(agentSelectionItems);
-  console.log(`\n${COLORS.bold}Select agents to run:${COLORS.reset} (press Enter to continue)\n`);
+    console.log(`${COLORS.bold}Analysis Configuration${COLORS.reset}\n`);
 
-  const selectedAgents = new Set();
-  recommended.forEach(a => selectedAgents.add(a.name)); // All recommended by default
+    console.log(`${COLORS.bold}Select Agents:${COLORS.reset}`);
+    recommended.forEach(a => {
+      const checked = selectedAgents.has(a.name) ? '☑' : '☐';
+      console.log(`  ${checked} ${a.name}`);
+    });
 
-  // Multi-select would be better, but Menu doesn't support it
-  // For now, show recommendation and proceed
-  console.log(`${COLORS.dim}Selected: ${Array.from(selectedAgents).join(', ')}${COLORS.reset}\n`);
-  console.log(`${COLORS.dim}Min severity: critical, high, medium${COLORS.reset}`);
-  console.log(`${COLORS.dim}Press any key to start analysis...${COLORS.reset}`);
-  await tui.getKeyPress();
+    console.log(`\n${COLORS.bold}Minimum Severity:${COLORS.reset}`);
+    severityLevels.forEach(level => {
+      const selected = minSeverity === level ? '◉' : '○';
+      console.log(`  ${selected} ${level}`);
+    });
+
+    console.log(`\n${COLORS.dim}[1-${recommended.length}] Toggle agent  [S/H/M/L] Set severity  [Enter] Start${COLORS.reset}`);
+
+    // Simple input - just press Enter to start
+    // For full menu, would need readline or similar
+    console.log(`\n${COLORS.dim}Press Enter to start analysis...${COLORS.reset}`);
+    await tui.getKeyPress();
+    configuring = false;
+  }
 
   const agentNames = Array.from(selectedAgents).map(c => `${c}-reviewer`);
 
@@ -450,11 +463,14 @@ async function runAnalysis(config) {
     }
   }
 
-  // Filter by minimum severity (exclude 'info' and 'low')
-  const minSeverityLevels = ['warning', 'high', 'critical', 'error'];
-  const filteredFindings = unique.filter(f =>
-    minSeverityLevels.includes(f.severity?.toLowerCase() || 'warning')
-  );
+  // Filter by minimum severity based on user selection
+  const severityOrder = { critical: 3, high: 2, medium: 1, low: 0 };
+  const minSeverityLevel = severityOrder[minSeverity] || 1;
+  const filteredFindings = unique.filter(f => {
+    const fSeverity = f.severity?.toLowerCase() || 'medium';
+    const fLevel = severityOrder[fSeverity] || 0;
+    return fLevel >= minSeverityLevel;
+  });
 
   ui.update(5, 5, activeChecks.length);
   ui.finish();

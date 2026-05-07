@@ -64,54 +64,63 @@ async function runLocalChecks(config) {
   return [];
 }
 
+const FALLBACK_MODELS = {
+  anthropic: ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
+  openai: ['gpt-4', 'gpt-4-turbo', 'gpt-3.5-turbo'],
+  gemini: ['gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash']
+};
+
+async function fetchAnthropicModels(apiKey) {
+  const res = await fetch('https://api.anthropic.com/v1/models?limit=100', {
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01'
+    }
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  return (data.data || [])
+    .filter(m => m.type === 'model' && m.id.startsWith('claude-'))
+    .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
+    .map(m => m.id);
+}
+
+async function fetchOpenAIModels(apiKey) {
+  const { default: OpenAI } = await import('openai');
+  const openai = new OpenAI({ apiKey });
+  const list = await openai.models.list();
+  const ids = (list.data || [])
+    .map(m => m.id)
+    .filter(id => /^(gpt-|o\d|chatgpt)/.test(id))
+    .filter(id => !/(embed|audio|whisper|tts|image|dall|moderation|realtime|search)/i.test(id))
+    .sort();
+  return ids.length > 0 ? ids : FALLBACK_MODELS.openai;
+}
+
+async function fetchGeminiModels(apiKey) {
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  return (data.models || [])
+    .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+    .map(m => m.name.replace(/^models\//, ''))
+    .filter(id => id.startsWith('gemini-'))
+    .sort();
+}
+
 async function getAvailableModels(provider, apiKey) {
-  if (!apiKey) {
-    // No API key, return defaults
-    const defaults = {
-      anthropic: ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
-      openai: ['gpt-4', 'gpt-4-turbo', 'gpt-3.5-turbo'],
-      gemini: ['gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash']
-    };
-    return defaults[provider] || [];
-  }
+  if (!apiKey) return FALLBACK_MODELS[provider] || [];
 
   try {
-    if (provider === 'anthropic') {
-      const client = new Anthropic({ apiKey });
-      // Test API key by making a quick call
-      await client.messages.create({
-        model: 'claude-opus-4-7',
-        max_tokens: 10,
-        messages: [{ role: 'user', content: 'test' }]
-      });
-      return ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'];
-    } else if (provider === 'openai') {
-      try {
-        const { default: OpenAI } = await import('openai');
-        const openai = new OpenAI({ apiKey });
-        await openai.models.list();
-        return ['gpt-4', 'gpt-4-turbo', 'gpt-3.5-turbo'];
-      } catch {
-        return ['gpt-4', 'gpt-4-turbo', 'gpt-3.5-turbo'];
-      }
-    } else if (provider === 'gemini') {
-      try {
-        const { GoogleGenerativeAI } = await import('@google/generative-ai');
-        const genAI = new GoogleGenerativeAI(apiKey);
-        genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-        return ['gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash'];
-      } catch {
-        return ['gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash'];
-      }
-    }
+    let models = [];
+    if (provider === 'anthropic') models = await fetchAnthropicModels(apiKey);
+    else if (provider === 'openai') models = await fetchOpenAIModels(apiKey);
+    else if (provider === 'gemini') models = await fetchGeminiModels(apiKey);
+
+    return models.length > 0 ? models : (FALLBACK_MODELS[provider] || []);
   } catch (error) {
-    // API key invalid or API unreachable, return defaults
-    const defaults = {
-      anthropic: ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
-      openai: ['gpt-4', 'gpt-4-turbo', 'gpt-3.5-turbo'],
-      gemini: ['gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash']
-    };
-    return defaults[provider] || [];
+    log(`getAvailableModels(${provider}) failed: ${error.message}`);
+    return FALLBACK_MODELS[provider] || [];
   }
 }
 
@@ -596,12 +605,20 @@ async function openSettings() {
   const currentProvider = config.provider || 'anthropic';
   const currentLanguage = config.language || 'english';
 
-  // Pre-load available models for each provider
+  // Pre-load available models for each provider in parallel
+  const stopSpinner = startProgressSpinner(() => 'Loading available models from providers...');
   const availableModelsByProvider = {};
-  for (const provider of providers) {
-    const apiKey = getApiKeyForProvider(provider);
-    availableModelsByProvider[provider] = await getAvailableModels(provider, apiKey);
+  const modelEntries = await Promise.all(
+    providers.map(async provider => {
+      const apiKey = getApiKeyForProvider(provider);
+      const models = await getAvailableModels(provider, apiKey);
+      return [provider, models];
+    })
+  );
+  for (const [provider, models] of modelEntries) {
+    availableModelsByProvider[provider] = models;
   }
+  stopSpinner();
 
   const currentApiKey = getApiKeyForProvider(currentProvider);
   const availableModels = availableModelsByProvider[currentProvider];

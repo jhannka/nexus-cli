@@ -131,6 +131,8 @@ Agents (4/7 complete):
   ⟳ types-reviewer       analyzing...
 ```
 
+Counts shown above are recalculated after deduplication and the current severity filter, so agents whose issues were dropped now report `0 findings`, keeping the UI honest and stabilizing per-agent metrics.
+
 ### 4. Results
 
 Multi-select findings with checkboxes. Press `S` to generate solutions for selected items.
@@ -151,6 +153,17 @@ Found 8 issue(s)
 
 [↑↓] navigate  [Space] toggle  [S] solve selected  [Esc] exit
 ```
+
+The redesigned ResultsMenu now:
+
+1. **Sorts findings** by severity (critical → low) then file:line so the riskiest issues stay at the top.
+2. **Displays only 10 rows per page** with pagination via `PgUp/PgDn`, while the header shows `Total · C critical · H high · M medium` plus the selected count.
+3. **Truncates file paths/titles** to fit, keeping the cursor, checkbox, severity tag, and `file:line` visible.
+4. **Shows a detail panel below** the list that renders the Problem and Suggestion text for the currently highlighted finding (wrapped to the current terminal width).
+
+New shortcuts help deal with big reviews: `[A]` select all, `[N]` deselect all, `[PgUp/PgDn]` page, `[g/G]` jump to top/bottom, and `[Q]/[Esc]` cancel back to the main menu.
+
+Per-agent counts and the header breakdown are recomputed after schema validation, deduplication, and severity filtering, so they always match the findings you can actually navigate and solve.
 
 ### 5. Solutions Viewer
 
@@ -233,28 +246,41 @@ Falls back to hardcoded list if API unreachable.
 
 ---
 
-## Pattern Detection
+## AI Agents
 
-Local pattern matchers run before AI calls. Each agent applies its regex set to the staged diff.
+Each agent runs as a separate AI call with a dedicated system prompt. Prompts live in `src/ai/prompts/*.txt` and follow the prism-style structure: focus areas, severity criteria, output format.
 
-### Security
+| Agent | Prompt | Focus |
+|-------|--------|-------|
+| security | `security-reviewer.txt` | OWASP Top 10: SQL injection, auth bypass, secrets, XSS, path traversal, SSRF, crypto, sensitive data leaks |
+| performance | `performance-reviewer.txt` | N+1 queries, blocking I/O, memory leaks, expensive loops, unnecessary re-renders |
+| architecture | `architecture-reviewer.txt` | SOLID violations, layering, coupling, separation of concerns |
+| testing | `testing-reviewer.txt` | Missing tests for changed logic, brittle assertions, coverage gaps |
+| quality / types / lint | `ts-reviewer.txt` | Type safety, null handling, dead code, consistency |
 
-| Pattern | Severity |
-|---------|----------|
-| SQL injection (string concat in SELECT/UPDATE) | high |
-| Hardcoded secrets (`password = 'xxx'`, `apiKey = '...'`) | critical |
-| eval / `new Function()` / dynamic timer code | critical |
-| `innerHTML =`, `dangerouslySetInnerHTML`, `document.write` | high |
-| `http://` (non-https), localhost dev URLs | high |
-| Path traversal (`fs.read(... + '..')`, `'../' + var`) | high |
+### How AI Validation Works
 
-### Quality
+1. **Diff parsing** — raw `git diff` parsed into structured form, each addition tagged with `[L{lineNumber}]` so the AI can reference exact lines.
+2. **System prompt assembly** — base prompt + injected sections:
+   - `DIFF_AWARENESS` — "you see only diff, don't flag missing code outside it"
+   - `LANGUAGE` — output findings in user's chosen language (en/es/fr/de)
+   - `SEVERITY_FOCUS` — "report only severities ≥ user threshold"
+   - `ACCESSIBILITY_DISABLED` — opt-out by default to reduce noise
+3. **Tool calling** — provider-native structured output:
+   - Anthropic → native `tool_use` with `report_findings` schema
+   - OpenAI → function calling with same schema
+   - Gemini → `responseMimeType: application/json`
+4. **Schema validation** — each returned finding must have `filePath`, `lineNumber`, `severity`, `category`, `title`, `problem`, `rationale`, `suggestion`. Invalid entries dropped.
+5. **Line number validation** — `lineNumber` must match a real addition line in the diff. Hallucinated lines dropped.
+6. **Severity filter at agent level** — findings below user's `minSeverity` dropped before returning.
 
-| Pattern | Severity |
-|---------|----------|
-| `: any`, `as any`, broad index signatures | medium |
-| Optional chaining without null check | medium |
-| Unused `const`/`let` declarations | low |
+### Determinism
+
+All AI calls use `temperature: 0`. OpenAI also passes `seed: 42`. Same diff + same prompts → same findings (within model's deterministic guarantees).
+
+### Dedup Strategy
+
+When multiple agents flag the same `file:line`, only the highest-severity finding is kept. Per-agent counts are recomputed after dedup so UI matches final list.
 
 ---
 
@@ -263,30 +289,33 @@ Local pattern matchers run before AI calls. Each agent applies its regex set to 
 ```
 Staged git diff
       ↓
-Local pattern detection (regex per agent)
+parseDiff → [L{num}] annotations
       ↓
-AI agents run in parallel (one per check type)
+N parallel AI tool calls (one per agent, temperature=0)
       ↓
-Findings deduplicated and severity-filtered
+Schema validation + line validation + severity filter
       ↓
-ResultsMenu (multi-select)
+Dedup by file:line (keep highest severity)
       ↓
-Per-finding parallel AI solution generation (45s timeout each)
+ResultsMenu (sorted, paginated, detail panel)
       ↓
-SolutionsViewer
+[S] Solve → per-finding parallel solution generation
       ↓
-Apply: AI generates {oldCode, newCode} JSON
+SolutionsViewer (syntax-highlighted, navigable)
+      ↓
+[A] Apply → AI generates {oldCode, newCode, reason}
       ↓
 Substring validation (anti-hallucination)
       ↓
-Diff preview + confirm
+Diff preview + [Y]/[N] confirm
       ↓
-writeFileSync
+writeFileSync → splice from list
 ```
 
-### Anti-Hallucination Guard
+### Anti-Hallucination Guards
 
-Apply rejects fixes when `oldCode` is not an exact substring of the file. Prevents AI from inventing code that breaks the file.
+- **Line numbers**: `lineNumber` returned by AI must match an actual addition line in the diff. If not, finding dropped.
+- **Apply patches**: `oldCode` must be exact substring of file content. If not, write rejected — AI invented code that doesn't exist.
 
 ### Solution Alignment
 
@@ -310,7 +339,7 @@ Solutions are generated per-finding (not batched), guaranteeing 1:1 alignment be
 |--------|------|
 | Main Menu | `↑↓` navigate · `Enter` select · `Q` quit |
 | Configuration | `↑↓` navigate · `Space` toggle · `Enter` start · `Q` quit |
-| Results | `↑↓` navigate · `Space` toggle · `S` solve selected · `Esc` exit |
+| Results | `↑↓` navigate · `Space` toggle · `S` solve selected · `A` select all · `N` select none · `PgUp/PgDn` page · `g/G` home/end · `Q`/`Esc` cancel |
 | Solutions Viewer | `←→` / `N/P` navigate · `A` apply · `Q` back |
 | Apply Confirm | `Y` apply · `N` cancel |
 | API Key Entry | `Enter` save · `Esc` cancel · `Backspace` delete |

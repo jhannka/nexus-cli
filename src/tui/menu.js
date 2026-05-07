@@ -25,6 +25,7 @@ export class Menu {
     this.selectedIndex = 0;
     this.version = options.version || '';
     this.tagline = options.tagline || 'AI-Powered Code Review';
+    this.greeting = options.greeting || 'Welcome. What would you like to do?';
   }
 
   render() {
@@ -36,14 +37,12 @@ export class Menu {
 
   renderHeader() {
     console.log(NEXUS_LOGO);
-    const versionLine = this.version ? `${COLORS.dim}v${this.version}${COLORS.reset}` : '';
-    const tagline = `${COLORS.cyan}${this.tagline}${COLORS.reset}`;
-    if (this.version) {
-      console.log(`                                            ${versionLine}`);
-    }
-    console.log(`            ${tagline}`);
+    const version = this.version ? ` ${COLORS.dim}·${COLORS.reset} ${COLORS.dim}v${this.version}${COLORS.reset}` : '';
+    console.log(`            ${COLORS.cyan}${this.tagline}${COLORS.reset}${version}`);
     console.log();
-    console.log(`${COLORS.dim}${'─'.repeat(60)}${COLORS.reset}`);
+    console.log(`  ${COLORS.bold}${this.greeting}${COLORS.reset}`);
+    console.log();
+    console.log(`  ${COLORS.cyan}${'━'.repeat(56)}${COLORS.reset}`);
     console.log();
   }
 
@@ -51,8 +50,8 @@ export class Menu {
     this.items.forEach((item, index) => {
       const isSelected = index === this.selectedIndex;
       const prefix = isSelected
-        ? `${COLORS.cyan}${COLORS.bold} ▶ ${COLORS.reset}`
-        : `   `;
+        ? `  ${COLORS.cyan}${COLORS.bold}❯${COLORS.reset}  `
+        : `     `;
       const label = isSelected
         ? `${COLORS.cyan}${COLORS.bold}${item.label}${COLORS.reset}`
         : `${COLORS.bold}${item.label}${COLORS.reset}`;
@@ -66,8 +65,8 @@ export class Menu {
   }
 
   renderFooter() {
-    console.log(`${COLORS.dim}${'─'.repeat(60)}${COLORS.reset}`);
-    const footer = `${COLORS.bold}[↑↓]${COLORS.reset} Navigate  ${COLORS.bold}[Enter]${COLORS.reset} Select  ${COLORS.bold}[Q]${COLORS.reset} Quit`;
+    console.log(`  ${COLORS.cyan}${'━'.repeat(56)}${COLORS.reset}`);
+    const footer = `  ${COLORS.dim}↑↓${COLORS.reset} navigate   ${COLORS.dim}↵${COLORS.reset} select   ${COLORS.dim}q${COLORS.reset} quit`;
     console.log(footer);
   }
 

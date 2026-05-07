@@ -856,9 +856,9 @@ async function openSettings() {
 
 async function main() {
   const mainMenu = new Menu([
-    { key: 'analyze', label: '▶️  Run Code Analysis', sublabel: 'Start analyzing the project' },
-    { key: 'settings', label: '⚙️  Settings', sublabel: 'Configure model, checks, API key' },
-    { key: 'quit', label: '❌ Quit', sublabel: 'Exit NEXUS' }
+    { key: 'analyze', label: 'Analyze code', sublabel: 'Review the project with AI' },
+    { key: 'settings', label: 'Settings', sublabel: 'Model · checks · API key' },
+    { key: 'quit', label: 'Quit', sublabel: 'See you next time' }
   ], { version: selfPkg.version });
 
   while (true) {

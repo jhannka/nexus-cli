@@ -71,8 +71,13 @@ export class PrismUI {
     const lines = this.buildDynamicBlock();
 
     if (this.dynamicLineCount > 0) {
-      // Move cursor up to previous dynamic block and overwrite
-      process.stdout.write(ANSI.cursorUp(this.dynamicLineCount));
+      try {
+        // Move cursor up to previous dynamic block and overwrite
+        process.stdout.write(ANSI.cursorUp(this.dynamicLineCount));
+      } catch (e) {
+        // Fallback - just print new lines
+        process.stderr.write('[DEBUG] Cursor movement failed, using fallback\n');
+      }
     }
 
     // Write dynamic block

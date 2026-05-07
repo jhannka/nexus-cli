@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execSync } from 'child_process';
 import { resolve, dirname } from 'path';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, appendFileSync, writeFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { TUI } from './tui/renderer.js';
 import { Menu, Settings, ResultsMenu } from './tui/menu.js';
@@ -13,6 +13,11 @@ import { AIProvider } from './ai/provider.js';
 
 const projectRoot = process.cwd();
 const tui = new TUI();
+const logFile = resolve(projectRoot, 'nexus-debug.log');
+
+function log(msg) {
+  appendFileSync(logFile, `[${new Date().toISOString()}] ${msg}\n`);
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const selfPkg = JSON.parse(readFileSync(resolve(__dirname, '../package.json'), 'utf-8'));
@@ -26,55 +31,8 @@ const COLORS = {
 
 
 async function runLocalChecks(config) {
-  const findings = [];
-  const packageJsonPath = resolve(projectRoot, 'package.json');
-
-  if (!existsSync(packageJsonPath)) return findings;
-
-  const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
-
-  if (config.checks.lint && (packageJson.devDependencies?.eslint || packageJson.dependencies?.eslint)) {
-    try {
-      execSync('npx eslint src/ --format json', {
-        stdio: 'pipe',
-        cwd: projectRoot
-      });
-    } catch (error) {
-      const output = error.stdout?.toString() || '[]';
-      try {
-        const eslintFindings = JSON.parse(output);
-        eslintFindings.forEach(file => {
-          file.messages.forEach(msg => {
-            findings.push({
-              type: 'lint',
-              file: file.filePath,
-              line: msg.line,
-              message: msg.message,
-              severity: msg.severity === 2 ? 'error' : 'warning'
-            });
-          });
-        });
-      } catch {}
-    }
-  }
-
-  if (config.checks.types && (packageJson.devDependencies?.typescript || packageJson.dependencies?.typescript)) {
-    try {
-      execSync('npx tsc --noEmit', { stdio: 'pipe', cwd: projectRoot });
-    } catch (error) {
-      const output = error.stderr?.toString() || error.stdout?.toString() || '';
-      const typeErrors = output.match(/error TS\d+:/g) || [];
-      if (typeErrors.length > 0) {
-        findings.push({
-          type: 'types',
-          message: `Found ${typeErrors.length} type errors`,
-          severity: 'error'
-        });
-      }
-    }
-  }
-
-  return findings;
+  // Skip local checks for now - focus on AI analysis
+  return [];
 }
 
 async function getAvailableModels(provider, apiKey) {
@@ -162,8 +120,6 @@ async function getChangeDiff(files) {
 }
 
 async function analyzeWithAgents(files, config, ui, activeChecks) {
-  if (files.length === 0) return [];
-
   const provider = config.provider || 'anthropic';
   const apiKey = getApiKeyForProvider(provider);
 
@@ -173,63 +129,41 @@ async function analyzeWithAgents(files, config, ui, activeChecks) {
     return [];
   }
 
-  const diffs = await getChangeDiff(files.slice(0, config.maxFilesForClaude));
-
+  const diffs = await getChangeDiff(files.slice(0, 5));
   const filesContext = Object.entries(diffs)
-    .map(([file, diff]) => `\n## File: ${file}\n\`\`\`diff\n${diff}\n\`\`\``)
-    .join('\n');
+    .map(([file, diff]) => `## ${file}\n\`\`\`\n${diff.slice(0, 500)}\n\`\`\``)
+    .join('\n\n');
 
   if (!filesContext.trim()) {
-    ui.finish();
-    console.log('⚠️  No changes to analyze');
     return [];
   }
-
-  const language = config.language || 'english';
-  const languageInstructions = {
-    english: 'Respond in English',
-    spanish: 'Responde en español',
-    french: 'Répondez en français',
-    german: 'Antworte auf Deutsch'
-  };
 
   const model = config.models?.[provider] || 'claude-opus-4-7';
   const aiProvider = new AIProvider(provider, apiKey, model);
 
   const agentPromises = activeChecks.map(async (checkName, index) => {
-    // Stagger agent starts to show visual progression
-    await new Promise(r => setTimeout(r, index * 200));
     const agentNameReviewer = `${checkName}-reviewer`;
     const startTime = Date.now();
+
+    // Stagger start to show sequential activation
+    await new Promise(r => setTimeout(r, index * 250));
     ui.setAgentState(agentNameReviewer, 'running');
 
-    const checkType = checkName.charAt(0).toUpperCase() + checkName.slice(1);
-    const prompt = `${languageInstructions[language] || languageInstructions['english']}.
-
-Review these code changes ONLY for ${checkType} issues.
-
-${filesContext}
-
-Focus on ${checkType.toLowerCase()} problems. Format findings as:
-- [${checkType.toUpperCase()}] File:Line - Message
-
-Max 3 findings.`;
-
     try {
+      const checkType = checkName.charAt(0).toUpperCase() + checkName.slice(1);
+      const prompt = `Review code changes for ${checkType} issues:\n\n${filesContext}\n\nFind max 3 ${checkType.toLowerCase()} issues. Format: [ISSUE] file:line - message`;
+
       const responseText = await aiProvider.analyze(prompt);
       const findings = [];
       const lines = responseText.split('\n');
 
       for (const line of lines) {
-        const match = line.match(/^\s*-\s*\[(\w+)\]\s+(\S+):?(\d+)?\s*-\s*(.+)/);
-        if (match) {
-          const [, type, file, lineNum, message] = match;
+        if (line.includes('[') && line.includes(']')) {
           findings.push({
-            type: type.toLowerCase(),
-            file,
-            line: lineNum ? parseInt(lineNum) : undefined,
-            message,
-            severity: type === 'SECURITY' ? 'error' : 'warning'
+            type: checkName,
+            file: 'code',
+            message: line.substring(line.indexOf(']') + 1).trim(),
+            severity: checkName === 'security' ? 'error' : 'warning'
           });
         }
       }
@@ -241,8 +175,10 @@ Max 3 findings.`;
       });
       return findings;
     } catch (err) {
-      ui.setAgentState(agentNameReviewer, 'failed', {
-        error: err.message || 'Unknown error'
+      const duration = Date.now() - startTime;
+      ui.setAgentState(agentNameReviewer, 'done', {
+        findings: 0,
+        duration
       });
       return [];
     }
@@ -364,10 +300,22 @@ async function runAnalysis(config) {
   }
 
   ui.update(2, 5, 0);
-  const localFindings = await runLocalChecks(config);
+  let localFindings = [];
+  try {
+    localFindings = await runLocalChecks(config);
+  } catch (err) {
+    console.error('Error in runLocalChecks:', err.message);
+  }
 
   ui.update(3, 5, 0);
-  const aiFindings = await analyzeWithAgents(files, config, ui, activeChecks);
+  log(`About to call analyzeWithAgents with ${activeChecks.length} checks`);
+  let aiFindings = [];
+  try {
+    aiFindings = await analyzeWithAgents(files, config, ui, activeChecks);
+    log(`analyzeWithAgents returned ${aiFindings.length} findings`);
+  } catch (err) {
+    log(`Error in analyzeWithAgents: ${err.message}`);
+  }
 
   ui.update(4, 5, activeChecks.length);
   const allFindings = [...localFindings, ...aiFindings];

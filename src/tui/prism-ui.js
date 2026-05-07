@@ -59,7 +59,10 @@ export class PrismUI {
       this._write(ANSI.hideCursor);
     }
 
-    this._renderDynamicBlock(1, 5, 0);
+    const lines = this._renderDynamicBlock(1, 5, 0);
+    for (const line of lines) {
+      this._write(line + '\n');
+    }
   }
 
   update(step, total, completedCount = 0) {

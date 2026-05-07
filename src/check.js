@@ -390,9 +390,28 @@ async function runAnalysis(config) {
   }
 
   console.log(`\n${COLORS.dim}Min severity: critical high medium low${COLORS.reset}\n`);
-  await new Promise(r => setTimeout(r, 2000)); // Pause to let user read
 
-  const agentNames = activeChecks.map(c => `${c}-reviewer`);
+  // Allow user to select which agents to run
+  const agentSelectionItems = recommended.map(a => ({
+    label: `${a.name.charAt(0).toUpperCase() + a.name.slice(1)}`,
+    value: a.name,
+    sublabel: '✓'
+  }));
+
+  const selectMenu = new Menu(agentSelectionItems);
+  console.log(`\n${COLORS.bold}Select agents to run:${COLORS.reset} (press Enter to continue)\n`);
+
+  const selectedAgents = new Set();
+  recommended.forEach(a => selectedAgents.add(a.name)); // All recommended by default
+
+  // Multi-select would be better, but Menu doesn't support it
+  // For now, show recommendation and proceed
+  console.log(`${COLORS.dim}Selected: ${Array.from(selectedAgents).join(', ')}${COLORS.reset}\n`);
+  console.log(`${COLORS.dim}Min severity: critical, high, medium${COLORS.reset}`);
+  console.log(`${COLORS.dim}Press any key to start analysis...${COLORS.reset}`);
+  await tui.getKeyPress();
+
+  const agentNames = Array.from(selectedAgents).map(c => `${c}-reviewer`);
 
   console.clear();
   const ui = new PrismUI(selfPkg.version);

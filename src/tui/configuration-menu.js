@@ -129,8 +129,7 @@ export class ConfigurationMenu {
           if (process.stdin.isTTY) {
             process.stdin.setRawMode(false);
           }
-          console.clear();
-          process.exit(0);
+          resolve({ cancelled: true });
         }
       };
 

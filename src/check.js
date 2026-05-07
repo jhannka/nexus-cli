@@ -424,6 +424,10 @@ async function runAnalysis(config) {
   const configMenu = new ConfigurationMenu(recommendedAgentNames, severityLevels);
   const userConfig = await configMenu.configure();
 
+  if (userConfig.cancelled) {
+    return { cancelled: true };
+  }
+
   const selectedAgents = new Set(userConfig.agents);
   const minSeverity = userConfig.severity;
 
@@ -760,9 +764,11 @@ async function main() {
           await tui.getKeyPress();
           break;
         }
-        await runAnalysis(config);
-        console.log(`\n${COLORS.dim}Press any key to return to menu...${COLORS.reset}`);
-        await tui.getKeyPress();
+        const result = await runAnalysis(config);
+        if (!result?.cancelled) {
+          console.log(`\n${COLORS.dim}Press any key to return to menu...${COLORS.reset}`);
+          await tui.getKeyPress();
+        }
         break;
       }
 

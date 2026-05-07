@@ -343,7 +343,7 @@ async function runAnalysis(config) {
   ui.init(commitMsg, branchRef, agentNames);
 
   ui.update(1, 5, 0);
-  const files = await getChangedFiles();
+  const files = git.getChangedFiles();
   if (files.length === 0) {
     ui.finish();
     console.log('⚠️  No code changes found in git');

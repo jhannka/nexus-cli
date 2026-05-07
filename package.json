@@ -1,5 +1,5 @@
 {
-  "name": "nexus-cli",
+  "name": "nexus-cli-prism",
   "version": "1.0.0",
   "description": "AI-powered code review CLI. Analyze any code (TypeScript, JavaScript, Python, Go, Java, etc.) with Claude, OpenAI, or Gemini.",
   "license": "MIT",

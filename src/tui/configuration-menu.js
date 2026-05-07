@@ -6,6 +6,14 @@ const COLORS = {
   bgCyan: '\x1b[46m'
 };
 
+const NEXUS_LOGO = `${COLORS.cyan}${COLORS.bold}
+███╗   ██╗███████╗██╗  ██╗██╗   ██╗███████╗
+████╗  ██║██╔════╝╚██╗██╔╝██║   ██║██╔════╝
+██╔██╗ ██║█████╗   ╚███╔╝ ██║   ██║███████╗
+██║╚██╗██║██╔══╝   ██╔██╗ ██║   ██║╚════██║
+██║ ╚████║███████╗██╔╝ ██╗╚██████╔╝███████║
+╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝${COLORS.reset}`;
+
 export class ConfigurationMenu {
   constructor(agents, severities) {
     this.agents = agents; // Array of agent names
@@ -47,6 +55,7 @@ export class ConfigurationMenu {
 
   render() {
     console.clear();
+    console.log(NEXUS_LOGO);
     console.log(`\n${COLORS.cyan}${COLORS.bold}NEXUS Configuration${COLORS.reset}\n`);
     console.log(`${COLORS.bold}Select agents and minimum severity${COLORS.reset}\n`);
 

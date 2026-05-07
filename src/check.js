@@ -381,6 +381,12 @@ async function runAnalysis(config) {
     }
   }
 
+  // Filter by minimum severity (exclude 'info' and 'low')
+  const minSeverityLevels = ['warning', 'high', 'critical', 'error'];
+  const filteredFindings = unique.filter(f =>
+    minSeverityLevels.includes(f.severity?.toLowerCase() || 'warning')
+  );
+
   ui.update(5, 5, activeChecks.length);
   ui.finish();
 
@@ -388,14 +394,14 @@ async function runAnalysis(config) {
   console.log('Findings');
   console.log('═'.repeat(50) + '\n');
 
-  if (unique.length === 0) {
+  if (filteredFindings.length === 0) {
     console.log('✨ No issues found!\n');
     console.log(`${COLORS.dim}Press any key to return to menu...${COLORS.reset}`);
     await tui.getKeyPress();
     return;
   }
 
-  const resultsMenu = new ResultsMenu(unique);
+  const resultsMenu = new ResultsMenu(filteredFindings);
   const selectedFindings = await resultsMenu.selectAndSolve();
 
   if (selectedFindings && selectedFindings.length > 0) {
@@ -414,7 +420,7 @@ async function runAnalysis(config) {
     }
   } else {
     const byType = {};
-    for (const finding of unique) {
+    for (const finding of filteredFindings) {
       const type = finding.type || 'other';
       if (!byType[type]) byType[type] = [];
       byType[type].push(finding);

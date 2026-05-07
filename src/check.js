@@ -120,7 +120,12 @@ async function getChangeDiff(files) {
 }
 
 async function analyzeWithAgents(files, config, ui, activeChecks) {
-  // Visual progress - agents transition states while analyzing
+  const findings = [];
+
+  // Run local analysis on changed files
+  const diffs = await getChangeDiff(files.slice(0, 5));
+  const filesContent = Object.entries(diffs);
+
   const agentPromises = activeChecks.map(async (checkName, index) => {
     const agentNameReviewer = `${checkName}-reviewer`;
     const startTime = Date.now();
@@ -129,21 +134,46 @@ async function analyzeWithAgents(files, config, ui, activeChecks) {
     await new Promise(r => setTimeout(r, index * 250));
     ui.setAgentState(agentNameReviewer, 'running');
 
+    // Analyze files for issues
+    const agentFindings = [];
+
+    if (checkName === 'security') {
+      // Check for security issues
+      filesContent.forEach(([file, diff]) => {
+        if (diff.includes('http://') && diff.includes('localhost')) {
+          agentFindings.push({ type: 'security', file, message: 'Insecure HTTP connection', severity: 'error' });
+        }
+        if (diff.includes('password') || diff.includes('credentials')) {
+          agentFindings.push({ type: 'security', file, message: 'Hardcoded credentials or sensitive data', severity: 'error' });
+        }
+      });
+    } else if (checkName === 'quality') {
+      // Check for quality issues
+      filesContent.forEach(([file, diff]) => {
+        if (diff.includes('any)') || diff.includes(': any')) {
+          agentFindings.push({ type: 'quality', file, message: 'Missing type annotations', severity: 'warning' });
+        }
+        if (diff.includes('null') || diff.includes('undefined')) {
+          agentFindings.push({ type: 'quality', file, message: 'Potential null/undefined reference', severity: 'warning' });
+        }
+      });
+    }
+
     // Simulate analysis time
-    await new Promise(r => setTimeout(r, 1200 + Math.random() * 1800));
+    await new Promise(r => setTimeout(r, 800 + Math.random() * 1200));
 
     // Report completion
     const duration = Date.now() - startTime;
     ui.setAgentState(agentNameReviewer, 'done', {
-      findings: Math.floor(Math.random() * 3),
+      findings: agentFindings.length,
       duration
     });
 
-    return [];
+    return agentFindings;
   });
 
-  await Promise.all(agentPromises);
-  return [];
+  const results = await Promise.all(agentPromises);
+  return results.flat();
 }
 
 async function generateSolutions(findings, config) {

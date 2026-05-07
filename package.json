@@ -25,6 +25,7 @@
   ],
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
+    "blessed": "^0.1.81",
     "glob": "^10.3.10"
   },
   "optionalDependencies": {

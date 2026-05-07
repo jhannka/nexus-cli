@@ -1,78 +1,87 @@
-const ESC = '\x1b';
+import blessed from 'blessed';
 
-const ANSI = {
-  reset: `${ESC}[0m`,
-  bold: `${ESC}[1m`,
-  dim: `${ESC}[2m`,
-  cyan: `${ESC}[36m`,
-  green: `${ESC}[32m`,
-  red: `${ESC}[31m`,
-  clearLine: `${ESC}[2K`,
-  col1: `${ESC}[1G`,
-  cursorUp: (n) => `${ESC}[${n}A`,
-  hideCursor: `${ESC}[?25l`,
-  showCursor: `${ESC}[?25h`,
-};
-
-const SUPPORTS_ANSI = process.stdout.isTTY &&
-  (process.platform !== 'win32' || process.env.WT_SESSION != null || process.env.ConEmuPID != null);
-
-const NEXUS_LOGO = `${ANSI.cyan}${ANSI.bold}
+const NEXUS_LOGO = `
 ███╗   ██╗███████╗██╗  ██╗██╗   ██╗███████╗
 ████╗  ██║██╔════╝╚██╗██╔╝██║   ██║██╔════╝
 ██╔██╗ ██║█████╗   ╚███╔╝ ██║   ██║███████╗
 ██║╚██╗██║██╔══╝   ██╔██╗ ██║   ██║╚════██║
 ██║ ╚████║███████╗██╔╝ ██╗╚██████╔╝███████║
-╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝${ANSI.reset}`;
-
-const LOGO_LINES = 7; // blank line + 6 logo lines
-
-const AGENT_ICONS = {
-  pending: '○',
-  running: `${ANSI.cyan}⟳${ANSI.reset}`,
-  done: `${ANSI.green}✓${ANSI.reset}`,
-  failed: `${ANSI.red}✗${ANSI.reset}`,
-};
+╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝`;
 
 export class PrismUI {
   constructor(version) {
     this.version = version;
-    this.agents = {}; // { name: { status, findings, duration, startTime } }
-    this.dynamicLineCount = 0;
-    this.lastStep = 0;
-    this.lastTotal = 0;
-    this.progressLog = [];
-    this.spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-    this.spinnerIndex = 0;
+    this.agents = {};
+    this.screen = blessed.screen({
+      mouse: false,
+      keyboard: false,
+      smartCSR: true,
+      title: 'NEXUS Code Review'
+    });
+
+    // Main container
+    this.mainBox = blessed.box({
+      parent: this.screen,
+      top: 0,
+      left: 0,
+      width: '100%',
+      height: '100%'
+    });
+
+    // Logo
+    this.logoBox = blessed.box({
+      parent: this.mainBox,
+      top: 0,
+      left: 0,
+      content: `{cyan}${NEXUS_LOGO}{/cyan}`,
+      height: 7,
+      width: '100%'
+    });
+
+    // Version
+    this.versionBox = blessed.box({
+      parent: this.mainBox,
+      top: 7,
+      left: 0,
+      content: `{bold}NEXUS{/bold} v${version}`,
+      height: 1,
+      width: '100%'
+    });
+
+    // Info (commit, branch)
+    this.infoBox = blessed.box({
+      parent: this.mainBox,
+      top: 8,
+      left: 0,
+      height: 3,
+      width: '100%',
+      content: ''
+    });
+
+    // Agents list
+    this.agentsBox = blessed.box({
+      parent: this.mainBox,
+      top: 11,
+      left: 0,
+      height: 'shrink',
+      width: '100%',
+      content: 'Analyzing...\n'
+    });
+
+    this.screen.key(['escape', 'q', 'C-c'], () => {
+      process.exit(0);
+    });
   }
 
   init(commitMsg, branchRef, agentNames) {
-    this._write(NEXUS_LOGO);
-    this._write(`\n${ANSI.bold}NEXUS${ANSI.reset} v${this.version}\n`);
-    this._write(`\nReviewing: ${commitMsg}\n`);
-    this._write(`${branchRef}\n`);
+    this.infoBox.setContent(`Reviewing: ${commitMsg}\n${branchRef}`);
 
     agentNames.forEach(name => {
-      this.agents[name] = 'pending';
+      this.agents[name] = { status: 'pending', findings: 0, duration: 0, startTime: 0 };
     });
 
-    this.dynamicLineCount = 4 + agentNames.length;
-
-    if (SUPPORTS_ANSI) {
-      this._write(ANSI.hideCursor);
-    }
-
-    const lines = this._renderDynamicBlock(1, 5, 0);
-    for (const line of lines) {
-      this._write(line + '\n');
-    }
-  }
-
-  update(step, total, completedCount = 0) {
-    this.lastStep = step;
-    this.lastTotal = total;
-    // Don't try to redraw - causes flickering on most terminals
-    // Progress shown via agent status lines instead
+    this.updateAgentsList();
+    this.screen.render();
   }
 
   setAgentState(agentName, state, details = {}) {
@@ -84,77 +93,61 @@ export class PrismUI {
     agent.status = state;
     Object.assign(agent, details);
 
-    const completed = Object.values(this.agents).filter(a => a.status === 'done').length;
-
-    // Show progress with spinner effect
-    if (state === 'running') {
-      if (!agent.startTime) {
-        agent.startTime = Date.now();
-      }
-      this._write(`\n${ANSI.cyan}⟳${ANSI.reset} ${agentName} ${ANSI.dim}analyzing...${ANSI.reset}`);
-    } else if (state === 'done') {
-      const duration = agent.duration || (Date.now() - (agent.startTime || Date.now()));
-      const durationStr = (duration / 1000).toFixed(1);
-      const stats = [
-        agent.findings && `${agent.findings} finding${agent.findings === 1 ? '' : 's'}`,
-        agent.skipped && `${agent.skipped} skipped`,
-        `${durationStr}s`
-      ].filter(Boolean).join(' · ');
-
-      this._write(` ${ANSI.green}✓${ANSI.reset}`);
-      if (stats) this._write(` ${ANSI.dim}${stats}${ANSI.reset}`);
-      this._write('\n');
-    } else if (state === 'failed') {
-      this._write(` ${ANSI.red}✗${ANSI.reset}`);
-      if (details.error) this._write(` ${ANSI.red}${details.error}${ANSI.reset}`);
-      this._write('\n');
+    if (state === 'running' && !agent.startTime) {
+      agent.startTime = Date.now();
     }
 
-    this.update(this.lastStep, this.lastTotal, completed);
+    this.updateAgentsList();
+    this.screen.render();
+  }
+
+  updateAgentsList() {
+    const lines = [];
+    lines.push('{bold}Agents:{/bold}');
+
+    for (const [agentName, agent] of Object.entries(this.agents)) {
+      let line = '';
+
+      switch (agent.status) {
+        case 'pending':
+          line = `  {dim}○ ${agentName}{/dim}`;
+          break;
+        case 'running':
+          line = `  {cyan}⟳ ${agentName} {dim}analyzing...{/dim}{/cyan}`;
+          break;
+        case 'done': {
+          const duration = agent.duration || (Date.now() - (agent.startTime || Date.now()));
+          const durationStr = (duration / 1000).toFixed(1);
+          const stats = [
+            agent.findings && `${agent.findings} finding${agent.findings === 1 ? '' : 's'}`,
+            agent.skipped && `${agent.skipped} skipped`,
+            `${durationStr}s`
+          ].filter(Boolean).join(' · ');
+
+          line = `  {green}✓ ${agentName}{/green}`;
+          if (stats) line += ` {dim}${stats}{/dim}`;
+          break;
+        }
+        case 'failed':
+          line = `  {red}✗ ${agentName}{/red}`;
+          if (agent.error) line += ` {red,dim}${agent.error}{/red,dim}`;
+          break;
+      }
+
+      lines.push(line);
+    }
+
+    this.agentsBox.setContent(lines.join('\n'));
+  }
+
+  update(step, total, completedCount = 0) {
+    // Update status if needed
+    this.screen.render();
   }
 
   finish() {
-    if (SUPPORTS_ANSI) {
-      this._write(ANSI.showCursor);
-    }
-    this._write('\n');
-  }
-
-  _renderProgressBar(completedCount, totalCount, width = 20) {
-    const percent = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
-    const filled = Math.round((percent / 100) * width);
-    const empty = width - filled;
-    const bar = '█'.repeat(filled) + '░'.repeat(empty);
-    return `${ANSI.cyan}[${bar}]${ANSI.reset} ${percent}%`;
-  }
-
-  _renderDynamicBlock(step, total, completedCount = 0) {
-    const lines = [];
-    lines.push('');
-    lines.push(`${ANSI.bold}Analysis in progress${ANSI.reset}`);
-    lines.push(`Step ${step}/${total} • ${Object.keys(this.agents).length} agents`);
-    lines.push('');
-
-    return lines;
-  }
-
-  _redraw(step, total, completedCount) {
-    const lines = this._renderDynamicBlock(step, total, completedCount);
-
-    if (SUPPORTS_ANSI) {
-      this._write(ANSI.cursorUp(this.dynamicLineCount));
-
-      for (const line of lines) {
-        this._write(ANSI.clearLine + ANSI.col1 + line + '\n');
-      }
-    } else {
-      for (const line of lines) {
-        console.log(line);
-      }
-    }
-  }
-
-  _write(str) {
-    process.stdout.write(str);
+    setTimeout(() => {
+      this.screen.destroy();
+    }, 500);
   }
 }

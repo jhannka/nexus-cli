@@ -95,9 +95,7 @@ export class PrismUI {
       if (!agent.startTime) {
         agent.startTime = Date.now();
       }
-      const spinner = this.spinnerFrames[this.spinnerIndex % this.spinnerFrames.length];
-      this._write(`\n${ANSI.cyan}${spinner}${ANSI.reset} ${agentName} analyzing...`);
-      this.spinnerIndex++;
+      this._write(`\n${ANSI.cyan}⟳${ANSI.reset} ${agentName} ${ANSI.dim}analyzing...${ANSI.reset}`);
     } else if (state === 'done') {
       const duration = agent.duration || (Date.now() - (agent.startTime || Date.now()));
       const durationStr = (duration / 1000).toFixed(1);

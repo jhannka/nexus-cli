@@ -1,90 +1,36 @@
-import blessed from 'blessed';
+const ANSI = {
+  reset: '\x1b[0m',
+  bold: '\x1b[1m',
+  dim: '\x1b[2m',
+  cyan: '\x1b[36m',
+  green: '\x1b[32m',
+  red: '\x1b[31m',
+};
 
-const NEXUS_LOGO = `
+const NEXUS_LOGO = `${ANSI.cyan}${ANSI.bold}
 ███╗   ██╗███████╗██╗  ██╗██╗   ██╗███████╗
 ████╗  ██║██╔════╝╚██╗██╔╝██║   ██║██╔════╝
 ██╔██╗ ██║█████╗   ╚███╔╝ ██║   ██║███████╗
 ██║╚██╗██║██╔══╝   ██╔██╗ ██║   ██║╚════██║
 ██║ ╚████║███████╗██╔╝ ██╗╚██████╔╝███████║
-╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝`;
+╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝${ANSI.reset}`;
 
 export class PrismUI {
   constructor(version) {
     this.version = version;
     this.agents = {};
-    this.screen = blessed.screen({
-      mouse: false,
-      keyboard: false,
-      smartCSR: true,
-      title: 'NEXUS Code Review'
-    });
-
-    // Main container
-    this.mainBox = blessed.box({
-      parent: this.screen,
-      top: 0,
-      left: 0,
-      width: '100%',
-      height: '100%'
-    });
-
-    // Logo
-    this.logoBox = blessed.box({
-      parent: this.mainBox,
-      top: 0,
-      left: 0,
-      content: `{cyan}${NEXUS_LOGO}{/cyan}`,
-      height: 7,
-      width: '100%'
-    });
-
-    // Version
-    this.versionBox = blessed.box({
-      parent: this.mainBox,
-      top: 7,
-      left: 0,
-      content: `{bold}NEXUS{/bold} v${version}`,
-      height: 1,
-      width: '100%'
-    });
-
-    // Info (commit, branch)
-    this.infoBox = blessed.box({
-      parent: this.mainBox,
-      top: 8,
-      left: 0,
-      height: 3,
-      width: '100%',
-      content: ''
-    });
-
-    // Agents list
-    this.agentsBox = blessed.box({
-      parent: this.mainBox,
-      top: 11,
-      left: 0,
-      height: 'shrink',
-      width: '100%',
-      content: 'Analyzing...\n'
-    });
-
-    this.screen.key(['escape', 'q', 'C-c'], () => {
-      process.exit(0);
-    });
   }
 
   init(commitMsg, branchRef, agentNames) {
-    this.infoBox.setContent(`{bold}Reviewing:{/bold} ${commitMsg}\n{dim}${branchRef}{/dim}`);
+    console.log(NEXUS_LOGO);
+    console.log(`\n${ANSI.bold}NEXUS${ANSI.reset} v${this.version}\n`);
+    console.log(`${ANSI.bold}Reviewing:${ANSI.reset} ${commitMsg}`);
+    console.log(`${branchRef}\n`);
+    console.log(`${ANSI.bold}Analyzing...${ANSI.reset}\n`);
 
     agentNames.forEach(name => {
       this.agents[name] = { status: 'pending', findings: 0, duration: 0, startTime: 0 };
     });
-
-    this.updateAgentsList();
-
-    // Render immediately and focus screen
-    this.screen.render();
-    this.screen.focus();
   }
 
   setAgentState(agentName, state, details = {}) {
@@ -100,69 +46,33 @@ export class PrismUI {
       agent.startTime = Date.now();
     }
 
-    this.updateAgentsList();
-    this.screen.render();
-  }
+    // Print status update
+    if (state === 'running') {
+      process.stdout.write(`${ANSI.cyan}⟳${ANSI.reset} ${agentName} ${ANSI.dim}analyzing...${ANSI.reset}`);
+    } else if (state === 'done') {
+      const duration = agent.duration || (Date.now() - (agent.startTime || Date.now()));
+      const durationStr = (duration / 1000).toFixed(1);
+      const stats = [
+        agent.findings && `${agent.findings} finding${agent.findings === 1 ? '' : 's'}`,
+        agent.skipped && `${agent.skipped} skipped`,
+        `${durationStr}s`
+      ].filter(Boolean).join(' · ');
 
-  updateAgentsList() {
-    const lines = [];
-    lines.push('{bold}Agents:{/bold}');
-
-    for (const [agentName, agent] of Object.entries(this.agents)) {
-      let line = '';
-
-      switch (agent.status) {
-        case 'pending':
-          line = `  {dim}○ ${agentName}{/dim}`;
-          break;
-        case 'running':
-          line = `  {cyan}⟳ ${agentName} {dim}analyzing...{/dim}{/cyan}`;
-          break;
-        case 'done': {
-          const duration = agent.duration || (Date.now() - (agent.startTime || Date.now()));
-          const durationStr = (duration / 1000).toFixed(1);
-          const stats = [
-            agent.findings && `${agent.findings} finding${agent.findings === 1 ? '' : 's'}`,
-            agent.skipped && `${agent.skipped} skipped`,
-            `${durationStr}s`
-          ].filter(Boolean).join(' · ');
-
-          line = `  {green}✓ ${agentName}{/green}`;
-          if (stats) line += ` {dim}${stats}{/dim}`;
-          break;
-        }
-        case 'failed':
-          line = `  {red}✗ ${agentName}{/red}`;
-          if (agent.error) line += ` {red,dim}${agent.error}{/red,dim}`;
-          break;
-      }
-
-      lines.push(line);
+      process.stdout.write(` ${ANSI.green}✓${ANSI.reset}`);
+      if (stats) process.stdout.write(` ${ANSI.dim}${stats}${ANSI.reset}`);
+      process.stdout.write('\n');
+    } else if (state === 'failed') {
+      process.stdout.write(` ${ANSI.red}✗${ANSI.reset}`);
+      if (agent.error) process.stdout.write(` ${ANSI.red}${agent.error}${ANSI.reset}`);
+      process.stdout.write('\n');
     }
-
-    this.agentsBox.setContent(lines.join('\n'));
   }
 
   update(step, total, completedCount = 0) {
-    // Update status if needed
-    this.screen.render();
+    // No-op
   }
 
   finish() {
-    // Keep screen visible, wait for user to press key
-    const key = blessed.box({
-      parent: this.screen,
-      top: this.screen.height - 2,
-      left: 0,
-      content: '{dim}Press any key to continue...{/dim}',
-      height: 1
-    });
-
-    this.screen.key(['escape', 'q', 'C-c', 'return', 'space'], () => {
-      this.screen.destroy();
-      process.exit(0);
-    });
-
-    this.screen.render();
+    console.log();
   }
 }

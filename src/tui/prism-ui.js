@@ -37,11 +37,13 @@ const AGENT_ICONS = {
 export class PrismUI {
   constructor(version) {
     this.version = version;
-    this.agents = {};
+    this.agents = {}; // { name: { status, findings, duration, startTime } }
     this.dynamicLineCount = 0;
     this.lastStep = 0;
     this.lastTotal = 0;
     this.progressLog = [];
+    this.spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+    this.spinnerIndex = 0;
   }
 
   init(commitMsg, branchRef, agentNames) {
@@ -77,22 +79,44 @@ export class PrismUI {
     }
   }
 
-  setAgentState(agentName, state) {
-    if (this.agents.hasOwnProperty(agentName)) {
-      this.agents[agentName] = state;
-      const completed = Object.values(this.agents).filter(s => s === 'done').length;
-
-      // Log progress visually
-      if (state === 'running') {
-        this._write(`\n${ANSI.cyan}⟳${ANSI.reset} ${agentName} analyzing...`);
-      } else if (state === 'done') {
-        this._write(` ${ANSI.green}✓${ANSI.reset}\n`);
-      } else if (state === 'failed') {
-        this._write(` ${ANSI.red}✗${ANSI.reset}\n`);
-      }
-
-      this.update(this.lastStep, this.lastTotal, completed);
+  setAgentState(agentName, state, details = {}) {
+    if (!this.agents.hasOwnProperty(agentName)) {
+      this.agents[agentName] = { status: 'pending', findings: 0, duration: 0, startTime: 0 };
     }
+
+    const agent = this.agents[agentName];
+    agent.status = state;
+    Object.assign(agent, details);
+
+    const completed = Object.values(this.agents).filter(a => a.status === 'done').length;
+
+    // Show progress with spinner effect
+    if (state === 'running') {
+      if (!agent.startTime) {
+        agent.startTime = Date.now();
+      }
+      const spinner = this.spinnerFrames[this.spinnerIndex % this.spinnerFrames.length];
+      this._write(`\n${ANSI.cyan}${spinner}${ANSI.reset} ${agentName} analyzing...`);
+      this.spinnerIndex++;
+    } else if (state === 'done') {
+      const duration = agent.duration || (Date.now() - (agent.startTime || Date.now()));
+      const durationStr = (duration / 1000).toFixed(1);
+      const stats = [
+        agent.findings && `${agent.findings} finding${agent.findings === 1 ? '' : 's'}`,
+        agent.skipped && `${agent.skipped} skipped`,
+        `${durationStr}s`
+      ].filter(Boolean).join(' · ');
+
+      this._write(` ${ANSI.green}✓${ANSI.reset}`);
+      if (stats) this._write(` ${ANSI.dim}${stats}${ANSI.reset}`);
+      this._write('\n');
+    } else if (state === 'failed') {
+      this._write(` ${ANSI.red}✗${ANSI.reset}`);
+      if (details.error) this._write(` ${ANSI.red}${details.error}${ANSI.reset}`);
+      this._write('\n');
+    }
+
+    this.update(this.lastStep, this.lastTotal, completed);
   }
 
   finish() {

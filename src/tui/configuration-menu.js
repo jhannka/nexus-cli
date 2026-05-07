@@ -78,7 +78,7 @@ export class ConfigurationMenu {
       }
     });
 
-    console.log(`\n${COLORS.bold}[↑↓]${COLORS.reset} Navigate  ${COLORS.bold}[Space]${COLORS.reset} Toggle  ${COLORS.bold}[Enter]${COLORS.reset} Start`);
+    console.log(`\n${COLORS.bold}[↑↓]${COLORS.reset} Navigate  ${COLORS.bold}[Space]${COLORS.reset} Toggle  ${COLORS.bold}[Enter]${COLORS.reset} Start  ${COLORS.bold}[Q]${COLORS.reset} Quit`);
   }
 
   async configure() {
@@ -124,7 +124,12 @@ export class ConfigurationMenu {
             agents: Array.from(this.selectedAgents),
             severity: this.selectedSeverity
           });
-        } else if (key === '\x03') { // Ctrl+C
+        } else if (key === '\x03' || key === 'q' || key === 'Q' || key === '\x1b') { // Ctrl+C, Q, Esc
+          process.stdin.removeListener('data', onData);
+          if (process.stdin.isTTY) {
+            process.stdin.setRawMode(false);
+          }
+          console.clear();
           process.exit(0);
         }
       };

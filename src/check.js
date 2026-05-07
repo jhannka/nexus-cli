@@ -1,13 +1,21 @@
 #!/usr/bin/env node
 import { execSync } from 'child_process';
-import { resolve } from 'path';
+import { resolve, dirname } from 'path';
+import { existsSync, readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
 import { TUI } from './tui/renderer.js';
 import { Menu, Settings, ResultsMenu } from './tui/menu.js';
+import { PrismUI } from './tui/prism-ui.js';
 import { loadConfig, getApiKeyForProvider, saveConfig, setApiKey, setChecks, setProvider, setModelForProvider, setLanguage } from './config/storage.js';
 import { CodeAnalyzer } from './core/analyzer.js';
+import { GitDetector } from './core/git-detector.js';
+import { AIProvider } from './ai/provider.js';
 
 const projectRoot = process.cwd();
 const tui = new TUI();
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const selfPkg = JSON.parse(readFileSync(resolve(__dirname, '../package.json'), 'utf-8'));
 
 const COLORS = {
   reset: '\x1b[0m',
@@ -16,57 +24,6 @@ const COLORS = {
   cyan: '\x1b[36m'
 };
 
-async function getChangedFiles() {
-  try {
-    // Get staged and unstaged changes
-    const stagedOutput = execSync('git diff --name-only --cached', {
-      cwd: projectRoot,
-      encoding: 'utf-8'
-    }).trim();
-
-    const unstagedOutput = execSync('git diff --name-only', {
-      cwd: projectRoot,
-      encoding: 'utf-8'
-    }).trim();
-
-    const untrackedOutput = execSync('git ls-files --others --exclude-standard', {
-      cwd: projectRoot,
-      encoding: 'utf-8'
-    }).trim();
-
-    const stagedFiles = stagedOutput ? stagedOutput.split('\n') : [];
-    const unstagedFiles = unstagedOutput ? unstagedOutput.split('\n') : [];
-    const untrackedFiles = untrackedOutput ? untrackedOutput.split('\n') : [];
-
-    const allChanges = [...new Set([...stagedFiles, ...unstagedFiles, ...untrackedFiles])];
-
-    // Filter out common non-code files
-    const codeFiles = allChanges.filter(f => {
-      const ignored = ['node_modules', 'dist', 'build', '.git', '.env', 'package-lock.json', 'yarn.lock'];
-      return !ignored.some(pattern => f.includes(pattern)) && f.trim();
-    });
-
-    return codeFiles.slice(0, 10);
-  } catch (error) {
-    console.log('⚠️  Not a git repository or git not available');
-    return [];
-  }
-}
-
-async function getCodeFiles() {
-  try {
-    const files = await glob('src/**/*', {
-      cwd: projectRoot,
-      ignore: ['node_modules/**', 'dist/**', '**/*.test.*', '**/*.spec.*', '**/.*'],
-      nodir: true
-    });
-    // Filter to only code files
-    const codeExtensions = /\.(js|ts|jsx|tsx|py|java|cs|go|rb|php|cpp|c|h|swift|kt|scala|sh|bash|json|yaml|yml|xml|html|css|scss|vue|svelte)$/i;
-    return files.filter(f => codeExtensions.test(f)).slice(0, 10);
-  } catch {
-    return [];
-  }
-}
 
 async function runLocalChecks(config) {
   const findings = [];
@@ -204,20 +161,18 @@ async function getChangeDiff(files) {
   return diffs;
 }
 
-async function analyzeWithAI(files, config) {
+async function analyzeWithAgents(files, config, ui, activeChecks) {
   if (files.length === 0) return [];
 
   const provider = config.provider || 'anthropic';
   const apiKey = getApiKeyForProvider(provider);
 
   if (!apiKey) {
+    ui.finish();
     console.log(`\n❌ No API key configured for ${provider}. Set one in Settings.`);
     return [];
   }
 
-  console.log(`\n🤖 Analyzing code changes with ${provider}...`);
-
-  // Get diffs of changed files
   const diffs = await getChangeDiff(files.slice(0, config.maxFilesForClaude));
 
   const filesContext = Object.entries(diffs)
@@ -225,14 +180,10 @@ async function analyzeWithAI(files, config) {
     .join('\n');
 
   if (!filesContext.trim()) {
+    ui.finish();
     console.log('⚠️  No changes to analyze');
     return [];
   }
-
-  const activeChecks = Object.entries(config.checks)
-    .filter(([, enabled]) => enabled)
-    .map(([name]) => name)
-    .join(', ');
 
   const language = config.language || 'english';
   const languageInstructions = {
@@ -242,88 +193,53 @@ async function analyzeWithAI(files, config) {
     german: 'Antworte auf Deutsch'
   };
 
-  const prompt = `${languageInstructions[language] || languageInstructions['english']}.
+  const model = config.models?.[provider] || 'claude-opus-4-7';
+  const aiProvider = new AIProvider(provider, apiKey, model);
 
-Review these code changes for issues in these areas: ${activeChecks}
+  const agentPromises = activeChecks.map(async (checkName) => {
+    ui.setAgentState(`${checkName}-reviewer`, 'running');
+
+    const checkType = checkName.charAt(0).toUpperCase() + checkName.slice(1);
+    const prompt = `${languageInstructions[language] || languageInstructions['english']}.
+
+Review these code changes ONLY for ${checkType} issues.
 
 ${filesContext}
 
-Focus on the changes shown in the diff. Format findings as:
-- [TYPE] File:Line - Message
+Focus on ${checkType.toLowerCase()} problems. Format findings as:
+- [${checkType.toUpperCase()}] File:Line - Message
 
-Be concise. Max 5 findings.`;
+Max 3 findings.`;
 
-  let responseText = '';
+    try {
+      const responseText = await aiProvider.analyze(prompt);
+      const findings = [];
+      const lines = responseText.split('\n');
 
-  try {
-    if (provider === 'anthropic') {
-      const client = new Anthropic({ apiKey });
-      const model = config.models?.anthropic || 'claude-opus-4-7';
-      const message = await client.messages.create({
-        model,
-        max_tokens: 1024,
-        messages: [{ role: 'user', content: prompt }]
-      });
-      responseText = message.content[0]?.text || '';
-    } else if (provider === 'openai') {
-      try {
-        const { default: OpenAI } = await import('openai');
-        const openai = new OpenAI({ apiKey });
-        const model = config.models?.openai || 'gpt-4';
-        const message = await openai.chat.completions.create({
-          model,
-          max_tokens: 1024,
-          messages: [{ role: 'user', content: prompt }]
-        });
-        responseText = message.choices[0]?.message?.content || '';
-      } catch (err) {
-        if (err.code === 'MODULE_NOT_FOUND') {
-          console.log('\n⚠️  OpenAI SDK not installed. Run: npm install openai');
-        } else {
-          console.log(`\n❌ Error calling OpenAI API:`, err.message);
+      for (const line of lines) {
+        const match = line.match(/^\s*-\s*\[(\w+)\]\s+(\S+):?(\d+)?\s*-\s*(.+)/);
+        if (match) {
+          const [, type, file, lineNum, message] = match;
+          findings.push({
+            type: type.toLowerCase(),
+            file,
+            line: lineNum ? parseInt(lineNum) : undefined,
+            message,
+            severity: type === 'SECURITY' ? 'error' : 'warning'
+          });
         }
-        return [];
       }
-    } else if (provider === 'gemini') {
-      try {
-        const { GoogleGenerativeAI } = await import('@google/generative-ai');
-        const genAI = new GoogleGenerativeAI(apiKey);
-        const model = config.models?.gemini || 'gemini-2.0-flash';
-        const generativeModel = genAI.getGenerativeModel({ model });
-        const response = await generativeModel.generateContent(prompt);
-        responseText = response.response.text();
-      } catch (err) {
-        if (err.code === 'MODULE_NOT_FOUND') {
-          console.log('\n⚠️  Google Generative AI SDK not installed. Run: npm install @google/generative-ai');
-        } else {
-          console.log(`\n❌ Error calling Gemini API:`, err.message);
-        }
-        return [];
-      }
+
+      ui.setAgentState(`${checkName}-reviewer`, 'done');
+      return findings;
+    } catch (err) {
+      ui.setAgentState(`${checkName}-reviewer`, 'failed');
+      return [];
     }
-  } catch (error) {
-    console.log(`\n❌ Error:`, error.message);
-    return [];
-  }
+  });
 
-  const findings = [];
-  const lines = responseText.split('\n');
-
-  for (const line of lines) {
-    const match = line.match(/^\s*-\s*\[(\w+)\]\s+(\S+):?(\d+)?\s*-\s*(.+)/);
-    if (match) {
-      const [, type, file, lineNum, message] = match;
-      findings.push({
-        type: type.toLowerCase(),
-        file,
-        line: lineNum ? parseInt(lineNum) : undefined,
-        message,
-        severity: type === 'security' ? 'error' : 'warning'
-      });
-    }
-  }
-
-  return findings;
+  const results = await Promise.all(agentPromises);
+  return results.flat();
 }
 
 async function generateSolutions(findings, config) {
@@ -413,28 +329,37 @@ For each issue:
 }
 
 async function runAnalysis(config) {
-  console.log('\n📋 Code Review - Changed Files\n');
-  console.log('Project:', projectRoot);
-  const provider = config.provider || 'anthropic';
-  const model = config.models?.[provider] || 'unknown';
-  console.log('Provider:', provider);
-  console.log('Model:', model);
-  console.log('═'.repeat(50) + '\n');
+  const git = new GitDetector(projectRoot);
+  const commitMsg = git.getLatestCommitMessage();
+  const branchRef = git.getBranchRef();
 
+  const activeChecks = Object.entries(config.checks)
+    .filter(([, enabled]) => enabled)
+    .map(([name]) => name);
+  const agentNames = activeChecks.map(c => `${c}-reviewer`);
+
+  console.clear();
+  const ui = new PrismUI(selfPkg.version);
+  ui.init(commitMsg, branchRef, agentNames);
+
+  ui.update(1, 5, 0);
   const files = await getChangedFiles();
   if (files.length === 0) {
+    ui.finish();
     console.log('⚠️  No code changes found in git');
     console.log('   (No staged/unstaged changes or new files)\n');
+    console.log(`${COLORS.dim}Press any key to return to menu...${COLORS.reset}`);
+    await tui.getKeyPress();
     return;
   }
 
-  console.log(`Found ${files.length} changed file(s):\n`);
-  files.forEach(f => console.log(`   ${f}`));
-  console.log();
-
+  ui.update(2, 5, 0);
   const localFindings = await runLocalChecks(config);
-  const aiFindings = await analyzeWithAI(files, config);
 
+  ui.update(3, 5, 0);
+  const aiFindings = await analyzeWithAgents(files, config, ui, activeChecks);
+
+  ui.update(4, 5, activeChecks.length);
   const allFindings = [...localFindings, ...aiFindings];
   const unique = [];
   const seen = new Set();
@@ -447,16 +372,20 @@ async function runAnalysis(config) {
     }
   }
 
+  ui.update(5, 5, activeChecks.length);
+  ui.finish();
+
   console.log('\n' + '═'.repeat(50));
   console.log('Findings');
   console.log('═'.repeat(50) + '\n');
 
   if (unique.length === 0) {
     console.log('✨ No issues found!\n');
+    console.log(`${COLORS.dim}Press any key to return to menu...${COLORS.reset}`);
+    await tui.getKeyPress();
     return;
   }
 
-  // Show results in interactive menu for selection
   const resultsMenu = new ResultsMenu(unique);
   const selectedFindings = await resultsMenu.selectAndSolve();
 
@@ -475,7 +404,6 @@ async function runAnalysis(config) {
       }
     }
   } else {
-    // Show summary if no selection
     const byType = {};
     for (const finding of unique) {
       const type = finding.type || 'other';
@@ -501,6 +429,9 @@ async function runAnalysis(config) {
     console.log('\n' + '═'.repeat(50));
     console.log(`Total: ${unique.length} issue(s) found\n`);
   }
+
+  console.log(`${COLORS.dim}Press any key to return to menu...${COLORS.reset}`);
+  await tui.getKeyPress();
 }
 
 async function openSettings() {

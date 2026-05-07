@@ -52,4 +52,40 @@ export class GitDetector {
     });
     return diffs;
   }
+
+  getLatestCommitMessage() {
+    try {
+      const msg = execSync('git log -1 --format=%s', {
+        cwd: this.projectRoot,
+        encoding: 'utf-8'
+      }).trim();
+      return msg.slice(0, 52) || 'No commit message';
+    } catch {
+      return 'No commit message';
+    }
+  }
+
+  getBranchRef() {
+    try {
+      const branch = execSync('git rev-parse --abbrev-ref HEAD', {
+        cwd: this.projectRoot,
+        encoding: 'utf-8'
+      }).trim();
+
+      try {
+        const remote = execSync('git remote get-url origin', {
+          cwd: this.projectRoot,
+          encoding: 'utf-8'
+        }).trim();
+
+        const match = remote.match(/[:/]([^/]+\/[^/]+?)(?:\.git)?$/);
+        const owner = match ? match[1] : 'local';
+        return `${owner}/${branch}`;
+      } catch {
+        return `local/${branch}`;
+      }
+    } catch {
+      return 'local/unknown';
+    }
+  }
 }

@@ -444,7 +444,7 @@ async function runAnalysis(config) {
   try {
     localFindings = await runLocalChecks(config);
   } catch (err) {
-    console.error('Error in runLocalChecks:', err.message);
+    log(`Error in runLocalChecks: ${err.message}`);
   }
 
   ui.update(3, 5, 0);

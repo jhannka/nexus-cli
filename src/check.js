@@ -7,6 +7,7 @@ import { TUI } from './tui/renderer.js';
 import { Menu, Settings, ResultsMenu } from './tui/menu.js';
 import { PrismUI } from './tui/prism-ui.js';
 import { ConfigurationMenu } from './tui/configuration-menu.js';
+import { SolutionsViewer } from './tui/solutions-viewer.js';
 import { loadConfig, getApiKeyForProvider, saveConfig, setApiKey, setChecks, setProvider, setModelForProvider, setLanguage } from './config/storage.js';
 import { CodeAnalyzer } from './core/analyzer.js';
 import { GitDetector } from './core/git-detector.js';
@@ -508,14 +509,9 @@ async function runAnalysis(config) {
     const solutions = await generateSolutions(selectedFindings, config);
 
     if (solutions && solutions.length > 0) {
-      console.log('\n' + '═'.repeat(50));
-      console.log('Recommended Solutions');
-      console.log('═'.repeat(50) + '\n');
-
-      for (const solution of solutions) {
-        console.log(solution.response);
-        console.log('\n' + '─'.repeat(50) + '\n');
-      }
+      const combined = solutions.map(s => s.response).join('\n\n');
+      const viewer = new SolutionsViewer(combined);
+      await viewer.show();
     }
   } else {
     const byType = {};

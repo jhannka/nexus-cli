@@ -31,6 +31,7 @@ export class PrismUI {
   }
 
   init(commitMsg, branchRef, agentNames) {
+    console.clear();
     process.stdout.write(NEXUS_LOGO);
     process.stdout.write(`\n${ANSI.bold}NEXUS${ANSI.reset} v${this.version}\n\n`);
     process.stdout.write(`${ANSI.bold}Reviewing:${ANSI.reset} ${commitMsg}\n`);
@@ -40,7 +41,7 @@ export class PrismUI {
       this.agents[name] = { status: 'pending', findings: 0, duration: 0, startTime: 0 };
     });
 
-    this.dynamicStartLine = process.stdout.isTTY ? 0 : -1; // -1 = no cursor control
+    this.dynamicLineCount = 0;
     this.render();
   }
 
@@ -69,17 +70,14 @@ export class PrismUI {
   render() {
     const lines = this.buildDynamicBlock();
 
-    if (process.stdout.isTTY && this.dynamicLineCount > 0) {
-      // Cursor movement: go back up and rewrite
+    if (this.dynamicLineCount > 0) {
+      // Move cursor up to previous dynamic block and overwrite
       process.stdout.write(ANSI.cursorUp(this.dynamicLineCount));
-      for (const line of lines) {
-        process.stdout.write(ANSI.clearLine + line + '\n');
-      }
-    } else {
-      // No TTY: just print new lines
-      for (const line of lines) {
-        console.log(line);
-      }
+    }
+
+    // Write dynamic block
+    for (const line of lines) {
+      process.stdout.write(ANSI.clearLine + line + '\n');
     }
 
     this.dynamicLineCount = lines.length;

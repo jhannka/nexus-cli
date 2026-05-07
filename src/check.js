@@ -196,7 +196,9 @@ async function analyzeWithAgents(files, config, ui, activeChecks) {
   const model = config.models?.[provider] || 'claude-opus-4-7';
   const aiProvider = new AIProvider(provider, apiKey, model);
 
-  const agentPromises = activeChecks.map(async (checkName) => {
+  const agentPromises = activeChecks.map(async (checkName, index) => {
+    // Stagger agent starts to show visual progression
+    await new Promise(r => setTimeout(r, index * 200));
     ui.setAgentState(`${checkName}-reviewer`, 'running');
 
     const checkType = checkName.charAt(0).toUpperCase() + checkName.slice(1);

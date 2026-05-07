@@ -416,57 +416,59 @@ async function runAnalysis(config) {
     });
   }
 
-  // Interactive selection menu
+  // Use Settings menu for configuration (like prism)
   const severityLevels = ['critical', 'high', 'medium', 'low'];
   let selectedAgents = new Set(recommended.map(a => a.name));
   let minSeverity = 'medium';
-  const recommendedArray = Array.from(recommended);
 
-  let configuring = true;
-  while (configuring) {
-    console.clear();
-    console.log(`${COLORS.cyan}${COLORS.bold}NEXUS${COLORS.reset} v${selfPkg.version}\n`);
-    console.log(`${COLORS.bold}Reviewing:${COLORS.reset} ${commitMsg}`);
-    console.log(`${branchRef}\n`);
+  const settingsItems = [
+    { separator: true },
+    { name: '🔍 Agents to Run', key: 'agents_header', special: true, editable: false },
+    ...recommended.map(a => ({
+      name: a.name.charAt(0).toUpperCase() + a.name.slice(1),
+      key: `agent_${a.name}`,
+      options: ['disabled', 'enabled'],
+      display: (val) => val,
+      editable: false
+    })),
+    { separator: true },
+    { name: 'Minimum Severity', key: 'severity', options: severityLevels, editable: false },
+    { separator: true }
+  ];
 
-    console.log(`${COLORS.bold}Analysis Configuration${COLORS.reset}\n`);
+  const settings = new Settings(settingsItems);
+  const values = {};
 
-    console.log(`${COLORS.bold}Select Agents:${COLORS.reset}`);
-    recommendedArray.forEach((a, i) => {
-      const checked = selectedAgents.has(a.name) ? '☑' : '☐';
-      console.log(`  [${i + 1}] ${checked} ${a.name}`);
-    });
+  // Initialize values
+  recommended.forEach(a => {
+    values[`agent_${a.name}`] = selectedAgents.has(a.name) ? 'enabled' : 'disabled';
+  });
+  values['severity'] = minSeverity;
+  settings.values = values;
 
-    console.log(`\n${COLORS.bold}Minimum Severity:${COLORS.reset}`);
-    severityLevels.forEach(level => {
-      const shortcut = level[0].toUpperCase();
-      const selected = minSeverity === level ? '◉' : '○';
-      console.log(`  [${shortcut}] ${selected} ${level}`);
-    });
+  // Simple approach - show settings and let user press space to toggle
+  console.clear();
+  console.log(`\n${COLORS.cyan}${COLORS.bold}NEXUS${COLORS.reset} v${selfPkg.version}\n`);
+  console.log(`${COLORS.bold}Reviewing:${COLORS.reset} ${commitMsg}`);
+  console.log(`${branchRef}\n`);
 
-    console.log(`\n${COLORS.dim}[1-${recommendedArray.length}] Toggle agent  [C/H/M/L] Set severity  [Enter] Start${COLORS.reset}`);
-    console.log(`${COLORS.dim}Example: Press "1" to toggle first agent, "H" for high severity${COLORS.reset}\n`);
+  console.log(`${COLORS.bold}Analysis Configuration${COLORS.reset}\n`);
 
-    process.stdout.write(`${COLORS.dim}> ${COLORS.reset}`);
-    const input = await readlineInput();
+  console.log(`${COLORS.bold}Agents:${COLORS.reset}`);
+  recommended.forEach(a => {
+    const checked = selectedAgents.has(a.name) ? '☑' : '☐';
+    console.log(`  ${checked} ${a.name.charAt(0).toUpperCase() + a.name.slice(1)}`);
+  });
 
-    if (input.toLowerCase() === '') {
-      configuring = false;
-    } else {
-      const num = parseInt(input);
-      if (num > 0 && num <= recommendedArray.length) {
-        const agentName = recommendedArray[num - 1].name;
-        if (selectedAgents.has(agentName)) {
-          selectedAgents.delete(agentName);
-        } else {
-          selectedAgents.add(agentName);
-        }
-      } else if (['c', 'h', 'm', 'l'].includes(input.toLowerCase())) {
-        const severityMap = { c: 'critical', h: 'high', m: 'medium', l: 'low' };
-        minSeverity = severityMap[input.toLowerCase()];
-      }
-    }
-  }
+  console.log(`\n${COLORS.bold}Minimum Severity:${COLORS.reset}`);
+  severityLevels.forEach(level => {
+    const selected = minSeverity === level ? '◉' : '○';
+    console.log(`  ${selected} ${level}`);
+  });
+
+  console.log(`\n${COLORS.dim}[SPACE] Toggle  [↑↓] Navigate  [ENTER] Continue${COLORS.reset}\n`);
+  console.log(`${COLORS.dim}Press ENTER to start analysis...${COLORS.reset}`);
+  await tui.getKeyPress();
 
   const agentNames = Array.from(selectedAgents).map(c => `${c}-reviewer`);
 

@@ -17,13 +17,13 @@ const ANSI = {
 const SUPPORTS_ANSI = process.stdout.isTTY &&
   (process.platform !== 'win32' || process.env.WT_SESSION != null || process.env.ConEmuPID != null);
 
-const PRISM_LOGO = `${ANSI.cyan}${ANSI.bold}
-██████╗ ██████╗ ██╗███████╗███╗   ███╗
-██╔══██╗██╔══██╗██║██╔════╝████╗ ████║
-██████╔╝██████╔╝██║███████╗██╔████╔██║
-██╔═══╝ ██╔══██╗██║╚════██║██║╚██╔╝██║
-██║     ██║  ██║██║███████║██║ ╚═╝ ██║
-╚═╝     ╚═╝  ╚═╝╚═╝╚══════╝╚═╝     ╚═╝${ANSI.reset}`;
+const NEXUS_LOGO = `${ANSI.cyan}${ANSI.bold}
+███╗   ██╗███████╗██╗  ██╗██╗   ██╗███████╗
+████╗  ██║██╔════╝╚██╗██╔╝██║   ██║██╔════╝
+██╔██╗ ██║█████╗   ╚███╔╝ ██║   ██║███████╗
+██║╚██╗██║██╔══╝   ██╔██╗ ██║   ██║╚════██║
+██║ ╚████║███████╗██╔╝ ██╗╚██████╔╝███████║
+╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝${ANSI.reset}`;
 
 const LOGO_LINES = 7; // blank line + 6 logo lines
 
@@ -44,8 +44,8 @@ export class PrismUI {
   }
 
   init(commitMsg, branchRef, agentNames) {
-    this._write(PRISM_LOGO);
-    this._write(`\n${ANSI.bold}PRISM${ANSI.reset} v${this.version}\n`);
+    this._write(NEXUS_LOGO);
+    this._write(`\n${ANSI.bold}NEXUS${ANSI.reset} v${this.version}\n`);
     this._write(`\nReviewing: ${commitMsg}\n`);
     this._write(`${branchRef}\n`);
 

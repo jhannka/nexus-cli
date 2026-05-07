@@ -830,7 +830,7 @@ async function main() {
     { key: 'analyze', label: '▶️  Run Code Analysis', sublabel: 'Start analyzing the project' },
     { key: 'settings', label: '⚙️  Settings', sublabel: 'Configure model, checks, API key' },
     { key: 'quit', label: '❌ Quit', sublabel: 'Exit NEXUS' }
-  ]);
+  ], { version: selfPkg.version });
 
   while (true) {
     const selected = await mainMenu.select();

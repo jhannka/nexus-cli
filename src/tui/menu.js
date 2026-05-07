@@ -11,10 +11,20 @@ const COLORS = {
   bgBlack: '\x1b[40m'
 };
 
+const NEXUS_LOGO = `${COLORS.cyan}${COLORS.bold}
+███╗   ██╗███████╗██╗  ██╗██╗   ██╗███████╗
+████╗  ██║██╔════╝╚██╗██╔╝██║   ██║██╔════╝
+██╔██╗ ██║█████╗   ╚███╔╝ ██║   ██║███████╗
+██║╚██╗██║██╔══╝   ██╔██╗ ██║   ██║╚════██║
+██║ ╚████║███████╗██╔╝ ██╗╚██████╔╝███████║
+╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝${COLORS.reset}`;
+
 export class Menu {
-  constructor(items) {
+  constructor(items, options = {}) {
     this.items = items;
     this.selectedIndex = 0;
+    this.version = options.version || '';
+    this.tagline = options.tagline || 'AI-Powered Code Review';
   }
 
   render() {
@@ -25,30 +35,39 @@ export class Menu {
   }
 
   renderHeader() {
-    const width = 50;
-    console.log(`\n${COLORS.cyan}┌${'─'.repeat(width)}┐${COLORS.reset}`);
-    console.log(`${COLORS.cyan}│${' '.repeat(Math.floor((width - 5) / 2))}NEXUS${' '.repeat(width - Math.floor((width - 5) / 2) - 5)}│${COLORS.reset}`);
-    console.log(`${COLORS.cyan}└${'─'.repeat(width)}┘${COLORS.reset}`);
+    console.log(NEXUS_LOGO);
+    const versionLine = this.version ? `${COLORS.dim}v${this.version}${COLORS.reset}` : '';
+    const tagline = `${COLORS.cyan}${this.tagline}${COLORS.reset}`;
+    if (this.version) {
+      console.log(`                                            ${versionLine}`);
+    }
+    console.log(`            ${tagline}`);
+    console.log();
+    console.log(`${COLORS.dim}${'─'.repeat(60)}${COLORS.reset}`);
+    console.log();
   }
 
   renderItems() {
-    console.log(`📋 ${COLORS.bold}Main Menu${COLORS.reset}\n`);
-
     this.items.forEach((item, index) => {
       const isSelected = index === this.selectedIndex;
-      const prefix = isSelected ? `${COLORS.bgCyan}●${COLORS.reset}` : '  ';
+      const prefix = isSelected
+        ? `${COLORS.cyan}${COLORS.bold} ▶ ${COLORS.reset}`
+        : `   `;
       const label = isSelected
         ? `${COLORS.cyan}${COLORS.bold}${item.label}${COLORS.reset}`
-        : item.label;
-      const sublabel = item.sublabel ? ` ${COLORS.dim}${item.sublabel}${COLORS.reset}` : '';
+        : `${COLORS.bold}${item.label}${COLORS.reset}`;
 
-      console.log(`${prefix} ${label}${sublabel}`);
+      console.log(`${prefix}${label}`);
+      if (item.sublabel) {
+        console.log(`     ${COLORS.dim}${item.sublabel}${COLORS.reset}`);
+      }
+      console.log();
     });
   }
 
   renderFooter() {
-    console.log();
-    const footer = `${COLORS.bold}[↑↓]${COLORS.reset} Navigate  ${COLORS.bold}[Enter]${COLORS.reset} Select`;
+    console.log(`${COLORS.dim}${'─'.repeat(60)}${COLORS.reset}`);
+    const footer = `${COLORS.bold}[↑↓]${COLORS.reset} Navigate  ${COLORS.bold}[Enter]${COLORS.reset} Select  ${COLORS.bold}[Q]${COLORS.reset} Quit`;
     console.log(footer);
   }
 
@@ -75,8 +94,14 @@ export class Menu {
             process.stdin.setRawMode(false);
           }
           resolve(this.items[this.selectedIndex]);
-        } else if (key === '\x03') { // Ctrl+C
-          process.exit(0);
+        } else if (key === 'q' || key === 'Q' || key === '\x03') { // Q or Ctrl+C
+          process.stdin.removeListener('data', onData);
+          if (process.stdin.isTTY) {
+            process.stdin.setRawMode(false);
+          }
+          const quitItem = this.items.find(i => i.key === 'quit');
+          if (quitItem) resolve(quitItem);
+          else process.exit(0);
         }
       };
 

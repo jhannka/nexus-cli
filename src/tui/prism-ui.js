@@ -71,12 +71,8 @@ export class PrismUI {
   update(step, total, completedCount = 0) {
     this.lastStep = step;
     this.lastTotal = total;
-
-    if (SUPPORTS_ANSI) {
-      this._redraw(step, total, completedCount);
-    } else {
-      this._renderDynamicBlock(step, total, completedCount);
-    }
+    // Don't try to redraw - causes flickering on most terminals
+    // Progress shown via agent status lines instead
   }
 
   setAgentState(agentName, state, details = {}) {
@@ -135,24 +131,9 @@ export class PrismUI {
   _renderDynamicBlock(step, total, completedCount = 0) {
     const lines = [];
     lines.push('');
-    lines.push(`${ANSI.dim}"${ANSI.reset} Step ${step}/${total}: Running ${Object.keys(this.agents).length} agents...`);
-    lines.push(this._renderProgressBar(completedCount, Object.keys(this.agents).length));
+    lines.push(`${ANSI.bold}Analysis in progress${ANSI.reset}`);
+    lines.push(`Step ${step}/${total} • ${Object.keys(this.agents).length} agents`);
     lines.push('');
-    lines.push(`${ANSI.bold}Agents (${completedCount}/${Object.keys(this.agents).length} complete):${ANSI.reset}`);
-
-    const maxNameLen = Math.max(...Object.keys(this.agents).map(n => n.length));
-
-    for (const [agentName, state] of Object.entries(this.agents)) {
-      const icon = AGENT_ICONS[state] || AGENT_ICONS.pending;
-      const padded = agentName.padEnd(maxNameLen);
-      let line = `  ${icon} ${padded}`;
-
-      if (state === 'running') {
-        line += `  ${ANSI.dim}analyzing...${ANSI.reset}`;
-      }
-
-      lines.push(line);
-    }
 
     return lines;
   }

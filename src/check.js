@@ -205,12 +205,22 @@ async function analyzeWithAgents(files, config, ui, activeChecks) {
         }
 
         // Path traversal
-        if (/fs\.(read|write|access).*\+.*\.\.|path.*\.\.|user.*path/i.test(diff)) {
+        if (/fs\.(read|write|access)[^)]*\.\.[^)]*\+|fs\.(read|write|access)[^)]*\+[^)]*\.\.|require\s*\(\s*['"][^'"]*\.\.[^'"]*\+|\.\.\/.*\+/i.test(diff)) {
           agentFindings.push({
             type: 'security',
             file,
             message: 'Potential path traversal vulnerability',
             severity: 'high'
+          });
+        }
+
+        // eval/dynamic code execution
+        if (/\beval\s*\(|new\s+Function\s*\(|setTimeout\s*\(\s*['"]|setInterval\s*\(\s*['"]/i.test(diff)) {
+          agentFindings.push({
+            type: 'security',
+            file,
+            message: 'Dynamic code execution detected (eval/Function)',
+            severity: 'critical'
           });
         }
       }

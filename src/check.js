@@ -277,6 +277,20 @@ async function analyzeWithAgents(files, config, ui, activeChecks) {
   return results.flat();
 }
 
+function startSpinner(message) {
+  const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+  let i = 0;
+  process.stdout.write('\n');
+  const timer = setInterval(() => {
+    process.stdout.write(`\r${COLORS.cyan}${frames[i % frames.length]}${COLORS.reset} ${message}`);
+    i++;
+  }, 80);
+  return () => {
+    clearInterval(timer);
+    process.stdout.write('\r\x1b[2K');
+  };
+}
+
 async function generateSolutions(findings, config) {
   if (!findings || findings.length === 0) return [];
 
@@ -288,10 +302,15 @@ async function generateSolutions(findings, config) {
     return [];
   }
 
-  console.log(`\n🔧 Generating solutions with ${provider}...\n`);
+  const defaultModels = {
+    anthropic: 'claude-opus-4-7',
+    openai: 'gpt-4',
+    gemini: 'gemini-2.0-flash'
+  };
+  const model = config.models?.[provider] || defaultModels[provider];
 
   const findingsText = findings
-    .map(f => `- [${f.severity.toUpperCase()}] ${f.file}:${f.line || '?'}\n  ${f.message}`)
+    .map(f => `- [${(f.severity || 'medium').toUpperCase()}] ${f.file}:${f.line || '?'}\n  ${f.message}`)
     .join('\n');
 
   const language = config.language || 'english';
@@ -319,46 +338,23 @@ For each issue:
    correct code here
    \`\`\``;
 
+  const stopSpinner = startSpinner(`Generating solutions with ${provider} (${model})...`);
+  const aiProvider = new AIProvider(provider, apiKey, model);
+  const TIMEOUT_MS = 90000;
+
   try {
-    if (provider === 'anthropic') {
-      const client = new Anthropic({ apiKey });
-      const model = config.models?.anthropic || 'claude-opus-4-7';
-      const message = await client.messages.create({
-        model,
-        max_tokens: 2048,
-        messages: [{ role: 'user', content: prompt }]
-      });
-      return [{ provider, response: message.content[0]?.text || '' }];
-    } else if (provider === 'openai') {
-      try {
-        const { default: OpenAI } = await import('openai');
-        const openai = new OpenAI({ apiKey });
-        const model = config.models?.openai || 'gpt-4';
-        const message = await openai.chat.completions.create({
-          model,
-          max_tokens: 2048,
-          messages: [{ role: 'user', content: prompt }]
-        });
-        return [{ provider, response: message.choices[0]?.message?.content || '' }];
-      } catch {
-        console.log('⚠️  OpenAI SDK not available');
-        return [];
-      }
-    } else if (provider === 'gemini') {
-      try {
-        const { GoogleGenerativeAI } = await import('@google/generative-ai');
-        const genAI = new GoogleGenerativeAI(apiKey);
-        const model = config.models?.gemini || 'gemini-2.0-flash';
-        const generativeModel = genAI.getGenerativeModel({ model });
-        const response = await generativeModel.generateContent(prompt);
-        return [{ provider, response: response.response.text() }];
-      } catch {
-        console.log('⚠️  Gemini SDK not available');
-        return [];
-      }
-    }
+    const response = await Promise.race([
+      aiProvider.analyze(prompt, { maxTokens: 4096 }),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`Timeout after ${TIMEOUT_MS / 1000}s`)), TIMEOUT_MS)
+      )
+    ]);
+    stopSpinner();
+    return [{ provider, response }];
   } catch (error) {
-    console.log(`\n❌ Error generating solutions: ${error.message}`);
+    stopSpinner();
+    console.log(`\n${COLORS.dim}❌ Error generating solutions: ${error.message}${COLORS.reset}`);
+    log(`generateSolutions error: ${error.stack || error.message}`);
     return [];
   }
 }

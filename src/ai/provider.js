@@ -7,34 +7,34 @@ export class AIProvider {
     this.model = model;
   }
 
-  async analyze(prompt) {
+  async analyze(prompt, options = {}) {
     if (this.provider === 'anthropic') {
-      return this.analyzeWithAnthropic(prompt);
+      return this.analyzeWithAnthropic(prompt, options);
     } else if (this.provider === 'openai') {
-      return this.analyzeWithOpenAI(prompt);
+      return this.analyzeWithOpenAI(prompt, options);
     } else if (this.provider === 'gemini') {
-      return this.analyzeWithGemini(prompt);
+      return this.analyzeWithGemini(prompt, options);
     }
     throw new Error(`Unknown provider: ${this.provider}`);
   }
 
-  async analyzeWithAnthropic(prompt) {
+  async analyzeWithAnthropic(prompt, options = {}) {
     const client = new Anthropic({ apiKey: this.apiKey });
     const message = await client.messages.create({
       model: this.model,
-      max_tokens: 1024,
+      max_tokens: options.maxTokens || 1024,
       messages: [{ role: 'user', content: prompt }]
     });
     return message.content[0]?.text || '';
   }
 
-  async analyzeWithOpenAI(prompt) {
+  async analyzeWithOpenAI(prompt, options = {}) {
     try {
       const { default: OpenAI } = await import('openai');
       const openai = new OpenAI({ apiKey: this.apiKey });
       const message = await openai.chat.completions.create({
         model: this.model,
-        max_tokens: 1024,
+        max_tokens: options.maxTokens || 1024,
         messages: [{ role: 'user', content: prompt }]
       });
       return message.choices[0]?.message?.content || '';
@@ -46,7 +46,7 @@ export class AIProvider {
     }
   }
 
-  async analyzeWithGemini(prompt) {
+  async analyzeWithGemini(prompt, options = {}) {
     try {
       const { GoogleGenerativeAI } = await import('@google/generative-ai');
       const genAI = new GoogleGenerativeAI(this.apiKey);

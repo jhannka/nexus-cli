@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { TUI } from './tui/renderer.js';
 import { Menu, Settings, ResultsMenu } from './tui/menu.js';
 import { PrismUI } from './tui/prism-ui.js';
+import { ConfigurationMenu } from './tui/configuration-menu.js';
 import { loadConfig, getApiKeyForProvider, saveConfig, setApiKey, setChecks, setProvider, setModelForProvider, setLanguage } from './config/storage.js';
 import { CodeAnalyzer } from './core/analyzer.js';
 import { GitDetector } from './core/git-detector.js';
@@ -416,59 +417,15 @@ async function runAnalysis(config) {
     });
   }
 
-  // Use Settings menu for configuration (like prism)
+  // Interactive configuration menu
   const severityLevels = ['critical', 'high', 'medium', 'low'];
-  let selectedAgents = new Set(recommended.map(a => a.name));
-  let minSeverity = 'medium';
+  const recommendedAgentNames = recommended.map(a => a.name);
 
-  const settingsItems = [
-    { separator: true },
-    { name: '🔍 Agents to Run', key: 'agents_header', special: true, editable: false },
-    ...recommended.map(a => ({
-      name: a.name.charAt(0).toUpperCase() + a.name.slice(1),
-      key: `agent_${a.name}`,
-      options: ['disabled', 'enabled'],
-      display: (val) => val,
-      editable: false
-    })),
-    { separator: true },
-    { name: 'Minimum Severity', key: 'severity', options: severityLevels, editable: false },
-    { separator: true }
-  ];
+  const configMenu = new ConfigurationMenu(recommendedAgentNames, severityLevels);
+  const userConfig = await configMenu.configure();
 
-  const settings = new Settings(settingsItems);
-  const values = {};
-
-  // Initialize values
-  recommended.forEach(a => {
-    values[`agent_${a.name}`] = selectedAgents.has(a.name) ? 'enabled' : 'disabled';
-  });
-  values['severity'] = minSeverity;
-  settings.values = values;
-
-  // Simple approach - show settings and let user press space to toggle
-  console.clear();
-  console.log(`\n${COLORS.cyan}${COLORS.bold}NEXUS${COLORS.reset} v${selfPkg.version}\n`);
-  console.log(`${COLORS.bold}Reviewing:${COLORS.reset} ${commitMsg}`);
-  console.log(`${branchRef}\n`);
-
-  console.log(`${COLORS.bold}Analysis Configuration${COLORS.reset}\n`);
-
-  console.log(`${COLORS.bold}Agents:${COLORS.reset}`);
-  recommended.forEach(a => {
-    const checked = selectedAgents.has(a.name) ? '☑' : '☐';
-    console.log(`  ${checked} ${a.name.charAt(0).toUpperCase() + a.name.slice(1)}`);
-  });
-
-  console.log(`\n${COLORS.bold}Minimum Severity:${COLORS.reset}`);
-  severityLevels.forEach(level => {
-    const selected = minSeverity === level ? '◉' : '○';
-    console.log(`  ${selected} ${level}`);
-  });
-
-  console.log(`\n${COLORS.dim}[SPACE] Toggle  [↑↓] Navigate  [ENTER] Continue${COLORS.reset}\n`);
-  console.log(`${COLORS.dim}Press ENTER to start analysis...${COLORS.reset}`);
-  await tui.getKeyPress();
+  const selectedAgents = new Set(userConfig.agents);
+  const minSeverity = userConfig.severity;
 
   const agentNames = Array.from(selectedAgents).map(c => `${c}-reviewer`);
 
@@ -487,16 +444,17 @@ async function runAnalysis(config) {
   }
 
   ui.update(3, 5, 0);
-  log(`About to call analyzeWithAgents with ${activeChecks.length} checks`);
+  const selectedChecks = Array.from(selectedAgents);
+  log(`About to call analyzeWithAgents with ${selectedChecks.length} checks`);
   let aiFindings = [];
   try {
-    aiFindings = await analyzeWithAgents(files, config, ui, activeChecks);
+    aiFindings = await analyzeWithAgents(files, config, ui, selectedChecks);
     log(`analyzeWithAgents returned ${aiFindings.length} findings`);
   } catch (err) {
     log(`Error in analyzeWithAgents: ${err.message}`);
   }
 
-  ui.update(4, 5, activeChecks.length);
+  ui.update(4, 5, selectedChecks.length);
   const allFindings = [...localFindings, ...aiFindings];
   const unique = [];
   const seen = new Set();

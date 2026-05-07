@@ -41,6 +41,7 @@ export class PrismUI {
     this.dynamicLineCount = 0;
     this.lastStep = 0;
     this.lastTotal = 0;
+    this.progressLog = [];
   }
 
   init(commitMsg, branchRef, agentNames) {
@@ -80,6 +81,16 @@ export class PrismUI {
     if (this.agents.hasOwnProperty(agentName)) {
       this.agents[agentName] = state;
       const completed = Object.values(this.agents).filter(s => s === 'done').length;
+
+      // Log progress visually
+      if (state === 'running') {
+        this._write(`\n${ANSI.cyan}⟳${ANSI.reset} ${agentName} analyzing...`);
+      } else if (state === 'done') {
+        this._write(` ${ANSI.green}✓${ANSI.reset}\n`);
+      } else if (state === 'failed') {
+        this._write(` ${ANSI.red}✗${ANSI.reset}\n`);
+      }
+
       this.update(this.lastStep, this.lastTotal, completed);
     }
   }

@@ -199,7 +199,9 @@ async function analyzeWithAgents(files, config, ui, activeChecks) {
   const agentPromises = activeChecks.map(async (checkName, index) => {
     // Stagger agent starts to show visual progression
     await new Promise(r => setTimeout(r, index * 200));
-    ui.setAgentState(`${checkName}-reviewer`, 'running');
+    const agentNameReviewer = `${checkName}-reviewer`;
+    const startTime = Date.now();
+    ui.setAgentState(agentNameReviewer, 'running');
 
     const checkType = checkName.charAt(0).toUpperCase() + checkName.slice(1);
     const prompt = `${languageInstructions[language] || languageInstructions['english']}.
@@ -232,10 +234,16 @@ Max 3 findings.`;
         }
       }
 
-      ui.setAgentState(`${checkName}-reviewer`, 'done');
+      const duration = Date.now() - startTime;
+      ui.setAgentState(agentNameReviewer, 'done', {
+        findings: findings.length,
+        duration
+      });
       return findings;
     } catch (err) {
-      ui.setAgentState(`${checkName}-reviewer`, 'failed');
+      ui.setAgentState(agentNameReviewer, 'failed', {
+        error: err.message || 'Unknown error'
+      });
       return [];
     }
   });

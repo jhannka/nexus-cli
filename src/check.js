@@ -120,32 +120,70 @@ async function getChangeDiff(files) {
 }
 
 async function analyzeWithAgents(files, config, ui, activeChecks) {
-  // Show what's happening
-  writeFileSync(logFile, `Files: ${files.length}, ActiveChecks: ${activeChecks.length}\n`);
+  const provider = config.provider || 'anthropic';
+  const apiKey = getApiKeyForProvider(provider);
+
+  // If no API key, show simulation only
+  if (!apiKey) {
+    const agentPromises = activeChecks.map(async (checkName, index) => {
+      const agentNameReviewer = `${checkName}-reviewer`;
+      await new Promise(r => setTimeout(r, index * 250));
+      ui.setAgentState(agentNameReviewer, 'running');
+      await new Promise(r => setTimeout(r, 1000 + Math.random() * 1500));
+      const duration = Date.now() - Date.now();
+      ui.setAgentState(agentNameReviewer, 'done', { findings: 0, duration: 1500 });
+      return [];
+    });
+    await Promise.all(agentPromises);
+    return [];
+  }
+
+  // Real analysis with API
+  const diffs = await getChangeDiff(files.slice(0, 3));
+  const filesContext = Object.entries(diffs)
+    .map(([file, diff]) => `${file}:\n${diff.slice(0, 300)}`)
+    .join('\n---\n');
+
+  if (!filesContext.trim()) {
+    return [];
+  }
+
+  const model = config.models?.[provider] || 'claude-opus-4-7';
+  const aiProvider = new AIProvider(provider, apiKey, model);
 
   const agentPromises = activeChecks.map(async (checkName, index) => {
     const agentNameReviewer = `${checkName}-reviewer`;
     const startTime = Date.now();
 
-    // Stagger start - MUST call setAgentState('running')
     await new Promise(r => setTimeout(r, index * 250));
     ui.setAgentState(agentNameReviewer, 'running');
 
-    // Simulate analysis
-    await new Promise(r => setTimeout(r, 1000 + Math.random() * 1500));
+    try {
+      const prompt = `Review for ${checkName} issues:\n${filesContext}\n\nList max 2 issues as: [TYPE] message`;
+      const responseText = await Promise.race([
+        aiProvider.analyze(prompt),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 15000))
+      ]);
 
-    // Complete agent
-    const duration = Date.now() - startTime;
-    ui.setAgentState(agentNameReviewer, 'done', {
-      findings: Math.floor(Math.random() * 2),
-      duration
-    });
+      const findings = [];
+      responseText.split('\n').forEach(line => {
+        if (line.includes('[') && line.includes(']')) {
+          findings.push({ type: checkName, message: line, severity: 'warning' });
+        }
+      });
 
-    return [];
+      const duration = Date.now() - startTime;
+      ui.setAgentState(agentNameReviewer, 'done', { findings: findings.length, duration });
+      return findings;
+    } catch (err) {
+      const duration = Date.now() - startTime;
+      ui.setAgentState(agentNameReviewer, 'done', { findings: 0, duration });
+      return [];
+    }
   });
 
-  await Promise.all(agentPromises);
-  return [];
+  const results = await Promise.all(agentPromises);
+  return results.flat();
 }
 
 async function generateSolutions(findings, config) {

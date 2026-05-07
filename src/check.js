@@ -510,7 +510,16 @@ async function runAnalysis(config) {
 
     if (solutions && solutions.length > 0) {
       const combined = solutions.map(s => s.response).join('\n\n');
-      const viewer = new SolutionsViewer(combined);
+      const provider = config.provider || 'anthropic';
+      const apiKey = getApiKeyForProvider(provider);
+      const defaultModels = { anthropic: 'claude-opus-4-7', openai: 'gpt-4', gemini: 'gemini-2.0-flash' };
+      const model = config.models?.[provider] || defaultModels[provider];
+
+      const viewer = new SolutionsViewer(combined, {
+        findings: selectedFindings,
+        projectRoot,
+        aiConfig: { provider, apiKey, model, language: config.language || 'english' }
+      });
       await viewer.show();
     }
   } else {

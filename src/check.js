@@ -120,49 +120,112 @@ async function getChangeDiff(files) {
 }
 
 async function analyzeWithAgents(files, config, ui, activeChecks) {
-  const findings = [];
-
-  // Run local analysis on changed files
   const diffs = await getChangeDiff(files.slice(0, 5));
-  const filesContent = Object.entries(diffs);
 
   const agentPromises = activeChecks.map(async (checkName, index) => {
     const agentNameReviewer = `${checkName}-reviewer`;
     const startTime = Date.now();
 
-    // Stagger agent activation
     await new Promise(r => setTimeout(r, index * 250));
     ui.setAgentState(agentNameReviewer, 'running');
 
-    // Analyze files for issues
     const agentFindings = [];
 
-    if (checkName === 'security') {
-      // Check for security issues
-      filesContent.forEach(([file, diff]) => {
-        if (diff.includes('http://') && diff.includes('localhost')) {
-          agentFindings.push({ type: 'security', file, message: 'Insecure HTTP connection', severity: 'error' });
+    // Analyze diff for specific patterns
+    for (const [file, diff] of Object.entries(diffs)) {
+      const lines = diff.split('\n');
+
+      if (checkName === 'security') {
+        // SQL Injection patterns
+        if (/SELECT.*FROM.*WHERE.*\$|sql\s*=.*\+|backtick.*\$|template.*sql/i.test(diff)) {
+          agentFindings.push({
+            type: 'security',
+            file,
+            message: 'Potential SQL injection - string concatenation in SQL query',
+            severity: 'high'
+          });
         }
-        if (diff.includes('password') || diff.includes('credentials')) {
-          agentFindings.push({ type: 'security', file, message: 'Hardcoded credentials or sensitive data', severity: 'error' });
+
+        // Hardcoded secrets
+        if (/(password|api_key|secret|token|credential)\s*=\s*['"][^'"]{5,}['"]|const\s+(password|api_key)\s*=/i.test(diff)) {
+          agentFindings.push({
+            type: 'security',
+            file,
+            message: 'Hardcoded secrets or credentials detected',
+            severity: 'critical'
+          });
         }
-      });
-    } else if (checkName === 'quality') {
-      // Check for quality issues
-      filesContent.forEach(([file, diff]) => {
-        if (diff.includes('any)') || diff.includes(': any')) {
-          agentFindings.push({ type: 'quality', file, message: 'Missing type annotations', severity: 'warning' });
+
+        // Insecure HTTP
+        if (/\bhttps?:\/\/localhost|http:\/\/.+:(3000|5000|8000|8080)|\bhttp:\/\//.test(diff) && !diff.includes('https')) {
+          agentFindings.push({
+            type: 'security',
+            file,
+            message: 'Insecure HTTP connection - use HTTPS',
+            severity: 'high'
+          });
         }
-        if (diff.includes('null') || diff.includes('undefined')) {
-          agentFindings.push({ type: 'quality', file, message: 'Potential null/undefined reference', severity: 'warning' });
+
+        // XSS risks
+        if (/innerHTML\s*=|dangerouslySetInnerHTML|document\.write|eval\(|Function\(/i.test(diff)) {
+          agentFindings.push({
+            type: 'security',
+            file,
+            message: 'Potential XSS vulnerability - unsafe DOM manipulation',
+            severity: 'high'
+          });
         }
-      });
+
+        // Path traversal
+        if (/fs\.(read|write|access).*\+.*\.\.|path.*\.\.|user.*path/i.test(diff)) {
+          agentFindings.push({
+            type: 'security',
+            file,
+            message: 'Potential path traversal vulnerability',
+            severity: 'high'
+          });
+        }
+      }
+
+      if (checkName === 'quality') {
+        // Type annotations
+        if (/(:\s*any|as\s+any|\[key:\s*string\]:\s*any)/i.test(diff)) {
+          agentFindings.push({
+            type: 'quality',
+            file,
+            message: 'Missing or overly broad type annotations',
+            severity: 'warning'
+          });
+        }
+
+        // Null checks
+        if (/\?\.|\?|null|undefined|!\./.test(diff) && !/if\s*\(|&&|optional|catch/.test(diff)) {
+          agentFindings.push({
+            type: 'quality',
+            file,
+            message: 'Potential null or undefined reference without checks',
+            severity: 'warning'
+          });
+        }
+
+        // Dead code
+        if (/const\s+\w+\s*=|let\s+\w+\s*=/.test(diff)) {
+          const unused = diff.match(/const\s+(\w+)|let\s+(\w+)/g) || [];
+          if (unused.length > 0) {
+            agentFindings.push({
+              type: 'quality',
+              file,
+              message: 'Potential unused variables detected',
+              severity: 'info'
+            });
+          }
+        }
+      }
     }
 
-    // Simulate analysis time
+    // Analysis time
     await new Promise(r => setTimeout(r, 800 + Math.random() * 1200));
 
-    // Report completion
     const duration = Date.now() - startTime;
     ui.setAgentState(agentNameReviewer, 'done', {
       findings: agentFindings.length,

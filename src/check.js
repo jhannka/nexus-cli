@@ -685,7 +685,9 @@ async function openSettings() {
     if (key === 'apiKey') {
       const provider = settingsScreen.values.provider;
       console.clear();
-      console.log(`\n🔑 ${fieldName} for ${providerLabels[provider]}\n`);
+      console.log(`\n${COLORS.cyan}${COLORS.bold}🔑 ${fieldName} for ${providerLabels[provider]}${COLORS.reset}\n`);
+      console.log(`${COLORS.bold}[Enter]${COLORS.reset} save  ${COLORS.bold}[Esc]${COLORS.reset} cancel  ${COLORS.bold}[Backspace]${COLORS.reset} delete  ${COLORS.bold}[Ctrl+C]${COLORS.reset} quit`);
+      console.log(`${COLORS.dim}${'─'.repeat(60)}${COLORS.reset}\n`);
       console.log('Enter your API key:');
       console.log(`${COLORS.dim}(input will be hidden)${COLORS.reset}\n`);
 

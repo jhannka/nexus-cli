@@ -127,10 +127,16 @@ export class PrismUI {
   _redraw(step, total, completedCount) {
     const lines = this._renderDynamicBlock(step, total, completedCount);
 
-    this._write(ANSI.cursorUp(this.dynamicLineCount));
+    if (SUPPORTS_ANSI) {
+      this._write(ANSI.cursorUp(this.dynamicLineCount));
 
-    for (const line of lines) {
-      this._write(ANSI.clearLine + ANSI.col1 + line + '\n');
+      for (const line of lines) {
+        this._write(ANSI.clearLine + ANSI.col1 + line + '\n');
+      }
+    } else {
+      for (const line of lines) {
+        console.log(line);
+      }
     }
   }
 

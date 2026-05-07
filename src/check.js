@@ -135,12 +135,12 @@ async function getChangeDiff(files) {
         } catch {
           // If not in git, get full file content
           const content = readFileSync(resolve(projectRoot, file), 'utf-8');
-          diff = `New file:\n${content.slice(0, 1000)}`;
+          diff = `New file:\n${content.slice(0, 8000)}`;
         }
       }
 
       if (diff.trim()) {
-        diffs[file] = diff.slice(0, 1000); // Limit to 1000 chars per file
+        diffs[file] = diff.slice(0, 8000); // Limit to 8000 chars per file
       }
     } catch {}
   }
@@ -482,15 +482,15 @@ async function runAnalysis(config) {
   }
 
   // Filter by minimum severity based on user selection
-  const severityOrder = { critical: 3, high: 2, medium: 1, low: 0 };
-  const minSeverityLevel = severityOrder[minSeverity] || 1;
+  const severityOrder = { critical: 3, high: 2, medium: 1, warning: 1, low: 0, info: 0 };
+  const minSeverityLevel = severityOrder[minSeverity] ?? 1;
   const filteredFindings = unique.filter(f => {
     const fSeverity = f.severity?.toLowerCase() || 'medium';
-    const fLevel = severityOrder[fSeverity] || 0;
+    const fLevel = severityOrder[fSeverity] ?? 1;
     return fLevel >= minSeverityLevel;
   });
 
-  ui.update(5, 5, activeChecks.length);
+  ui.update(5, 5, selectedChecks.length);
   ui.finish();
 
   console.log('\n' + '═'.repeat(50));

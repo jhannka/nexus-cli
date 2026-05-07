@@ -292,6 +292,20 @@ function startSpinner(message) {
   };
 }
 
+function startProgressSpinner(getMessage) {
+  const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+  let i = 0;
+  process.stdout.write('\n');
+  const timer = setInterval(() => {
+    process.stdout.write(`\r\x1b[2K${COLORS.cyan}${frames[i % frames.length]}${COLORS.reset} ${getMessage()}`);
+    i++;
+  }, 80);
+  return () => {
+    clearInterval(timer);
+    process.stdout.write('\r\x1b[2K');
+  };
+}
+
 async function generateSolutions(findings, config) {
   if (!findings || findings.length === 0) return [];
 
@@ -310,10 +324,6 @@ async function generateSolutions(findings, config) {
   };
   const model = config.models?.[provider] || defaultModels[provider];
 
-  const findingsText = findings
-    .map(f => `- [${(f.severity || 'medium').toUpperCase()}] ${f.file}:${f.line || '?'}\n  ${f.message}`)
-    .join('\n');
-
   const language = config.language || 'english';
   const languageInstructions = {
     english: 'Respond in English',
@@ -321,43 +331,59 @@ async function generateSolutions(findings, config) {
     french: 'Répondez en français',
     german: 'Antworte auf Deutsch'
   };
+  const langInst = languageInstructions[language] || languageInstructions.english;
 
-  const prompt = `${languageInstructions[language] || languageInstructions['english']}.
-
-You are a code review expert. Generate practical solutions for these code issues:
-
-${findingsText}
-
-For each issue:
-1. Explain why it's a problem
-2. Show the correct code
-3. Format as:
-   ## Issue: [file:line] - [type]
-   **Problem**: explanation
-   **Solution**:
-   \`\`\`typescript
-   correct code here
-   \`\`\``;
-
-  const stopSpinner = startSpinner(`Generating solutions with ${provider} (${model})...`);
   const aiProvider = new AIProvider(provider, apiKey, model);
-  const TIMEOUT_MS = 90000;
+  const PER_CALL_TIMEOUT_MS = 45000;
 
-  try {
-    const response = await Promise.race([
-      aiProvider.analyze(prompt, { maxTokens: 4096 }),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error(`Timeout after ${TIMEOUT_MS / 1000}s`)), TIMEOUT_MS)
-      )
-    ]);
-    stopSpinner();
-    return [{ provider, response }];
-  } catch (error) {
-    stopSpinner();
-    console.log(`\n${COLORS.dim}❌ Error generating solutions: ${error.message}${COLORS.reset}`);
-    log(`generateSolutions error: ${error.stack || error.message}`);
-    return [];
-  }
+  let completed = 0;
+  const total = findings.length;
+  const stopSpinner = startProgressSpinner(() =>
+    `Generating solutions with ${provider} (${model})... ${completed}/${total}`
+  );
+
+  const promises = findings.map(async (finding) => {
+    const sev = (finding.severity || 'medium').toUpperCase();
+    const prompt = `${langInst}.
+
+You are a code review expert. Generate a practical solution for this single code issue:
+
+[${sev}] ${finding.file}:${finding.line || '?'}
+${finding.message}
+
+Format your response as:
+## Issue: ${finding.file}:${finding.line || '?'} - ${finding.type || 'issue'}
+**Problem**: brief explanation of why it's a problem
+**Solution**:
+\`\`\`typescript
+correct code example here
+\`\`\`
+
+Keep response concise and focused on this one issue.`;
+
+    try {
+      const response = await Promise.race([
+        aiProvider.analyze(prompt, { maxTokens: 1024 }),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error(`timeout ${PER_CALL_TIMEOUT_MS / 1000}s`)), PER_CALL_TIMEOUT_MS)
+        )
+      ]);
+      completed++;
+      return { provider, finding, response };
+    } catch (error) {
+      completed++;
+      log(`Solution error for ${finding.file}: ${error.message}`);
+      return {
+        provider,
+        finding,
+        response: `## Issue: ${finding.file}:? - ${finding.type || 'issue'}\n**Problem**: ${finding.message}\n**Solution**:\n\`\`\`\n// AI generation failed: ${error.message}\n\`\`\``
+      };
+    }
+  });
+
+  const results = await Promise.all(promises);
+  stopSpinner();
+  return results;
 }
 
 async function categorizeAgents(files) {
@@ -510,13 +536,14 @@ async function runAnalysis(config) {
 
     if (solutions && solutions.length > 0) {
       const combined = solutions.map(s => s.response).join('\n\n');
+      const orderedFindings = solutions.map(s => s.finding);
       const provider = config.provider || 'anthropic';
       const apiKey = getApiKeyForProvider(provider);
       const defaultModels = { anthropic: 'claude-opus-4-7', openai: 'gpt-4', gemini: 'gemini-2.0-flash' };
       const model = config.models?.[provider] || defaultModels[provider];
 
       const viewer = new SolutionsViewer(combined, {
-        findings: selectedFindings,
+        findings: orderedFindings,
         projectRoot,
         aiConfig: { provider, apiKey, model, language: config.language || 'english' }
       });

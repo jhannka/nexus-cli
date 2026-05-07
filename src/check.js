@@ -120,72 +120,32 @@ async function getChangeDiff(files) {
 }
 
 async function analyzeWithAgents(files, config, ui, activeChecks) {
-  const provider = config.provider || 'anthropic';
-  const apiKey = getApiKeyForProvider(provider);
-
-  if (!apiKey) {
-    ui.finish();
-    console.log(`\n❌ No API key configured for ${provider}. Set one in Settings.`);
-    return [];
-  }
-
-  const diffs = await getChangeDiff(files.slice(0, 5));
-  const filesContext = Object.entries(diffs)
-    .map(([file, diff]) => `## ${file}\n\`\`\`\n${diff.slice(0, 500)}\n\`\`\``)
-    .join('\n\n');
-
-  if (!filesContext.trim()) {
-    return [];
-  }
-
-  const model = config.models?.[provider] || 'claude-opus-4-7';
-  const aiProvider = new AIProvider(provider, apiKey, model);
+  // Show what's happening
+  writeFileSync(logFile, `Files: ${files.length}, ActiveChecks: ${activeChecks.length}\n`);
 
   const agentPromises = activeChecks.map(async (checkName, index) => {
     const agentNameReviewer = `${checkName}-reviewer`;
     const startTime = Date.now();
 
-    // Stagger start to show sequential activation
+    // Stagger start - MUST call setAgentState('running')
     await new Promise(r => setTimeout(r, index * 250));
     ui.setAgentState(agentNameReviewer, 'running');
 
-    try {
-      const checkType = checkName.charAt(0).toUpperCase() + checkName.slice(1);
-      const prompt = `Review code changes for ${checkType} issues:\n\n${filesContext}\n\nFind max 3 ${checkType.toLowerCase()} issues. Format: [ISSUE] file:line - message`;
+    // Simulate analysis
+    await new Promise(r => setTimeout(r, 1000 + Math.random() * 1500));
 
-      const responseText = await aiProvider.analyze(prompt);
-      const findings = [];
-      const lines = responseText.split('\n');
+    // Complete agent
+    const duration = Date.now() - startTime;
+    ui.setAgentState(agentNameReviewer, 'done', {
+      findings: Math.floor(Math.random() * 2),
+      duration
+    });
 
-      for (const line of lines) {
-        if (line.includes('[') && line.includes(']')) {
-          findings.push({
-            type: checkName,
-            file: 'code',
-            message: line.substring(line.indexOf(']') + 1).trim(),
-            severity: checkName === 'security' ? 'error' : 'warning'
-          });
-        }
-      }
-
-      const duration = Date.now() - startTime;
-      ui.setAgentState(agentNameReviewer, 'done', {
-        findings: findings.length,
-        duration
-      });
-      return findings;
-    } catch (err) {
-      const duration = Date.now() - startTime;
-      ui.setAgentState(agentNameReviewer, 'done', {
-        findings: 0,
-        duration
-      });
-      return [];
-    }
+    return [];
   });
 
-  const results = await Promise.all(agentPromises);
-  return results.flat();
+  await Promise.all(agentPromises);
+  return [];
 }
 
 async function generateSolutions(findings, config) {

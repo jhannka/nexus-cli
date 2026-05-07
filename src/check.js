@@ -246,13 +246,17 @@ async function analyzeWithAgents(files, config, ui, activeChecks) {
 
       const findings = [];
       const rawFindings = (result && Array.isArray(result.findings)) ? result.findings : [];
+      const sevRank = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
+      const minRank = sevRank[minSeverity] ?? 2;
       for (const raw of rawFindings) {
         const normalized = normalizeFinding(raw, agentNameReviewer);
         if (!normalized) {
           log(`[${agentNameReviewer}] dropped invalid finding`);
           continue;
         }
-        if (normalized.severity === 'low' || normalized.severity === 'info') {
+        const fRank = sevRank[normalized.severity] ?? 0;
+        if (fRank < minRank) {
+          log(`[${agentNameReviewer}] dropped ${normalized.severity} finding (below min ${minSeverity})`);
           continue;
         }
         if (!isValidAdditionLine(normalized.filePath, normalized.lineNumber, parsedFiles)) {
@@ -528,6 +532,17 @@ async function runAnalysis(config) {
     const fLevel = severityOrder[fSeverity] ?? 1;
     return fLevel >= minSeverityLevel;
   });
+
+  // Recompute per-agent counts after dedup+filter so UI matches final list
+  const perAgent = {};
+  for (const aid of agentNames) perAgent[aid] = 0;
+  for (const f of filteredFindings) {
+    const aid = f.agentId || `${f.type}-reviewer`;
+    if (perAgent[aid] !== undefined) perAgent[aid] += 1;
+  }
+  for (const [agentId, count] of Object.entries(perAgent)) {
+    ui.setAgentState(agentId, 'done', { findings: count });
+  }
 
   ui.update(5, 5, selectedChecks.length);
   ui.finish();

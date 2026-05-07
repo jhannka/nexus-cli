@@ -74,14 +74,17 @@ export class PrismUI {
   }
 
   init(commitMsg, branchRef, agentNames) {
-    this.infoBox.setContent(`Reviewing: ${commitMsg}\n${branchRef}`);
+    this.infoBox.setContent(`{bold}Reviewing:{/bold} ${commitMsg}\n{dim}${branchRef}{/dim}`);
 
     agentNames.forEach(name => {
       this.agents[name] = { status: 'pending', findings: 0, duration: 0, startTime: 0 };
     });
 
     this.updateAgentsList();
+
+    // Render immediately and focus screen
     this.screen.render();
+    this.screen.focus();
   }
 
   setAgentState(agentName, state, details = {}) {
@@ -146,8 +149,20 @@ export class PrismUI {
   }
 
   finish() {
-    setTimeout(() => {
+    // Keep screen visible, wait for user to press key
+    const key = blessed.box({
+      parent: this.screen,
+      top: this.screen.height - 2,
+      left: 0,
+      content: '{dim}Press any key to continue...{/dim}',
+      height: 1
+    });
+
+    this.screen.key(['escape', 'q', 'C-c', 'return', 'space'], () => {
       this.screen.destroy();
-    }, 500);
+      process.exit(0);
+    });
+
+    this.screen.render();
   }
 }

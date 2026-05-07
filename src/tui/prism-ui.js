@@ -1,10 +1,15 @@
+const ESC = '\x1b';
 const ANSI = {
-  reset: '\x1b[0m',
-  bold: '\x1b[1m',
-  dim: '\x1b[2m',
-  cyan: '\x1b[36m',
-  green: '\x1b[32m',
-  red: '\x1b[31m',
+  reset: `${ESC}[0m`,
+  bold: `${ESC}[1m`,
+  dim: `${ESC}[2m`,
+  cyan: `${ESC}[36m`,
+  green: `${ESC}[32m`,
+  red: `${ESC}[31m`,
+  yellow: `${ESC}[33m`,
+  clearLine: `${ESC}[2K`,
+  cursorHome: `${ESC}[H`,
+  cursorUp: (n) => `${ESC}[${n}A`,
 };
 
 const NEXUS_LOGO = `${ANSI.cyan}${ANSI.bold}
@@ -19,18 +24,24 @@ export class PrismUI {
   constructor(version) {
     this.version = version;
     this.agents = {};
+    this.dynamicStartLine = 0;
+    this.dynamicLineCount = 0;
+    this.lastStep = 1;
+    this.lastTotal = 5;
   }
 
   init(commitMsg, branchRef, agentNames) {
-    console.log(NEXUS_LOGO);
-    console.log(`\n${ANSI.bold}NEXUS${ANSI.reset} v${this.version}\n`);
-    console.log(`${ANSI.bold}Reviewing:${ANSI.reset} ${commitMsg}`);
-    console.log(`${branchRef}\n`);
-    console.log(`${ANSI.bold}Analyzing...${ANSI.reset}\n`);
+    process.stdout.write(NEXUS_LOGO);
+    process.stdout.write(`\n${ANSI.bold}NEXUS${ANSI.reset} v${this.version}\n\n`);
+    process.stdout.write(`${ANSI.bold}Reviewing:${ANSI.reset} ${commitMsg}\n`);
+    process.stdout.write(`${branchRef}\n\n`);
 
     agentNames.forEach(name => {
       this.agents[name] = { status: 'pending', findings: 0, duration: 0, startTime: 0 };
     });
+
+    this.dynamicStartLine = process.stdout.isTTY ? 0 : -1; // -1 = no cursor control
+    this.render();
   }
 
   setAgentState(agentName, state, details = {}) {
@@ -46,30 +57,95 @@ export class PrismUI {
       agent.startTime = Date.now();
     }
 
-    // Print status update
-    if (state === 'running') {
-      process.stdout.write(`${ANSI.cyan}⟳${ANSI.reset} ${agentName} ${ANSI.dim}analyzing...${ANSI.reset}`);
-    } else if (state === 'done') {
-      const duration = agent.duration || (Date.now() - (agent.startTime || Date.now()));
-      const durationStr = (duration / 1000).toFixed(1);
-      const stats = [
-        agent.findings && `${agent.findings} finding${agent.findings === 1 ? '' : 's'}`,
-        agent.skipped && `${agent.skipped} skipped`,
-        `${durationStr}s`
-      ].filter(Boolean).join(' · ');
-
-      process.stdout.write(` ${ANSI.green}✓${ANSI.reset}`);
-      if (stats) process.stdout.write(` ${ANSI.dim}${stats}${ANSI.reset}`);
-      process.stdout.write('\n');
-    } else if (state === 'failed') {
-      process.stdout.write(` ${ANSI.red}✗${ANSI.reset}`);
-      if (agent.error) process.stdout.write(` ${ANSI.red}${agent.error}${ANSI.reset}`);
-      process.stdout.write('\n');
-    }
+    this.render();
   }
 
   update(step, total, completedCount = 0) {
-    // No-op
+    this.lastStep = step;
+    this.lastTotal = total;
+    this.render();
+  }
+
+  render() {
+    const lines = this.buildDynamicBlock();
+
+    if (process.stdout.isTTY && this.dynamicLineCount > 0) {
+      // Cursor movement: go back up and rewrite
+      process.stdout.write(ANSI.cursorUp(this.dynamicLineCount));
+      for (const line of lines) {
+        process.stdout.write(ANSI.clearLine + line + '\n');
+      }
+    } else {
+      // No TTY: just print new lines
+      for (const line of lines) {
+        console.log(line);
+      }
+    }
+
+    this.dynamicLineCount = lines.length;
+  }
+
+  buildDynamicBlock() {
+    const lines = [];
+
+    // Step and agent count
+    const completed = Object.values(this.agents).filter(a => a.status === 'done').length;
+    const total = Object.keys(this.agents).length;
+    lines.push(`${ANSI.dim}"${ANSI.reset} Step ${this.lastStep}/${this.lastTotal}: Running ${total} agents...`);
+
+    // Progress bar
+    const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+    const barWidth = 20;
+    const filled = Math.round((percent / 100) * barWidth);
+    const empty = barWidth - filled;
+    const bar = '█'.repeat(filled) + '░'.repeat(empty);
+    lines.push(`${ANSI.cyan}[${bar}]${ANSI.reset} ${percent}%`);
+
+    // Blank line
+    lines.push('');
+
+    // Agents header
+    lines.push(`${ANSI.bold}Agents (${completed}/${total} complete):${ANSI.reset}`);
+
+    // Agent list
+    const maxNameLen = Math.max(...Object.keys(this.agents).map(n => n.length));
+    for (const [agentName, agent] of Object.entries(this.agents)) {
+      let line = '';
+      const padded = agentName.padEnd(maxNameLen);
+
+      switch (agent.status) {
+        case 'pending':
+          line = `  ${ANSI.dim}○ ${padded}${ANSI.reset}`;
+          break;
+        case 'running':
+          line = `  ${ANSI.cyan}⟳ ${padded}    ${ANSI.dim}analyzing...${ANSI.reset}${ANSI.reset}`;
+          break;
+        case 'done': {
+          const duration = agent.duration || (Date.now() - (agent.startTime || Date.now()));
+          const durationStr = (duration / 1000).toFixed(1);
+          const stats = [
+            agent.findings && `${agent.findings} finding${agent.findings === 1 ? '' : 's'}`,
+            agent.skipped && `${agent.skipped} skipped`,
+            `${durationStr}s`
+          ].filter(Boolean).join(' · ');
+
+          line = `  ${ANSI.green}✓ ${padded}${ANSI.reset}`;
+          if (stats) line += ` ${ANSI.dim}${stats}${ANSI.reset}`;
+          break;
+        }
+        case 'failed':
+          line = `  ${ANSI.red}✗ ${padded}${ANSI.reset}`;
+          if (agent.error) line += ` ${ANSI.dim}${agent.error}${ANSI.reset}`;
+          break;
+      }
+
+      lines.push(line);
+    }
+
+    // Blank line
+    lines.push('');
+
+    return lines;
   }
 
   finish() {

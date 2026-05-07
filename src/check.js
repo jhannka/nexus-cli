@@ -687,20 +687,20 @@ async function openSettings() {
       console.clear();
       console.log(`\n🔑 ${fieldName} for ${providerLabels[provider]}\n`);
       console.log('Enter your API key:');
-      console.log('(input will be hidden)\n');
+      console.log(`${COLORS.dim}(input will be hidden)${COLORS.reset}\n`);
 
-      return new Promise(resolve => {
+      const input = await new Promise(resolve => {
         process.stdout.write('  > ');
 
         if (process.stdin.isTTY) {
           process.stdin.setRawMode(true);
         }
 
-        let input = '';
+        let buf = '';
         const onData = data => {
           const char = data.toString();
 
-          if (char === '\x03') { // Ctrl+C
+          if (char === '\x03') {
             process.stdout.write('\n');
             process.exit();
           }
@@ -711,29 +711,56 @@ async function openSettings() {
             if (process.stdin.isTTY) {
               process.stdin.setRawMode(false);
             }
-
-            // Save the API key and set as active provider
-            if (input.trim()) {
-              setApiKey(provider, input.trim());
-              setProvider(provider); // Make this the active provider
-              console.log(`✅ API key saved for ${provider}\n`);
-              console.log(`✅ ${provider} set as active provider\n`);
-              resolve(`✓ Set`);
-            } else {
-              console.log('⚠️  No key entered\n');
-              resolve(getApiKeyForProvider(provider) ? `✓ Set` : `✗ Not set`);
+            resolve(buf);
+          } else if (char === '\x1b') {
+            process.stdin.removeListener('data', onData);
+            if (process.stdin.isTTY) {
+              process.stdin.setRawMode(false);
             }
-          } else if (char === '\x7f') { // Backspace
-            input = input.slice(0, -1);
+            resolve(null);
+          } else if (char === '\x7f') {
+            buf = buf.slice(0, -1);
             process.stdout.write('\b \b');
-          } else if (char !== '\x1b') { // Ignore escape sequences
-            input += char;
+          } else {
+            buf += char;
             process.stdout.write('*');
           }
         };
 
         process.stdin.on('data', onData);
       });
+
+      if (input === null) {
+        console.log(`${COLORS.dim}Cancelled${COLORS.reset}\n`);
+        return getApiKeyForProvider(provider) ? '✓ Set' : '✗ Not set';
+      }
+
+      if (!input.trim()) {
+        console.log('⚠️  No key entered\n');
+        return getApiKeyForProvider(provider) ? '✓ Set' : '✗ Not set';
+      }
+
+      setApiKey(provider, input.trim());
+      setProvider(provider);
+      console.log(`${COLORS.cyan}✅ API key saved for ${provider}${COLORS.reset}`);
+      console.log(`${COLORS.cyan}✅ ${provider} set as active provider${COLORS.reset}\n`);
+
+      console.log(`${COLORS.bold}[M]${COLORS.reset} Save & return to main menu  ${COLORS.bold}[Any key]${COLORS.reset} Stay in settings`);
+
+      const next = await new Promise(resolve => {
+        if (process.stdin.isTTY) process.stdin.setRawMode(true);
+        const onKey = data => {
+          process.stdin.removeListener('data', onKey);
+          if (process.stdin.isTTY) process.stdin.setRawMode(false);
+          resolve(data.toString().toLowerCase());
+        };
+        process.stdin.once('data', onKey);
+      });
+
+      if (next === 'm') {
+        settingsScreen.exit();
+      }
+      return '✓ Set';
     }
     return undefined;
   };

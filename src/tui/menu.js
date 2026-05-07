@@ -263,8 +263,19 @@ export class Settings {
     console.log(`${footer}`);
   }
 
+  exit() {
+    if (this._resolve) {
+      if (this._onData) process.stdin.removeListener('data', this._onData);
+      if (process.stdin.isTTY) process.stdin.setRawMode(false);
+      const r = this._resolve;
+      this._resolve = null;
+      r(this.values);
+    }
+  }
+
   async edit() {
     return new Promise(resolve => {
+      this._resolve = resolve;
       this.render();
 
       if (process.stdin.isTTY) {
@@ -317,7 +328,8 @@ export class Settings {
                     this.onUpdate(current.key, newValue);
                   }
                 }
-                // Re-attach listener and render
+                // Only re-attach if edit() hasn't already resolved (e.g., via exit())
+                if (!this._resolve) return;
                 if (process.stdin.isTTY) {
                   process.stdin.setRawMode(true);
                 }
@@ -331,18 +343,21 @@ export class Settings {
           if (process.stdin.isTTY) {
             process.stdin.setRawMode(false);
           }
+          this._resolve = null;
           resolve(this.values);
         } else if (key === '\x1b') { // Escape
           process.stdin.removeListener('data', onData);
           if (process.stdin.isTTY) {
             process.stdin.setRawMode(false);
           }
+          this._resolve = null;
           resolve(null);
         } else if (key === '\x03') { // Ctrl+C
           process.exit(0);
         }
       };
 
+      this._onData = onData;
       process.stdin.on('data', onData);
     });
   }
